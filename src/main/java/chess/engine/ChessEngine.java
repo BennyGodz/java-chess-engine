@@ -25,6 +25,6 @@ public class ChessEngine {
     }
 
     public Move findBestMove(Board board) {
-        return search.findBestMove(board, 4, 2_000).bestMove();
+        return search.findBestMove(board, 9, 6_000).bestMove();
     }
 }

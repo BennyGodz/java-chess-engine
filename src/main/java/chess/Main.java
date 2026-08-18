@@ -5,6 +5,7 @@ import chess.board.Move;
 import chess.board.Position;
 import chess.engine.ChessEngine;
 import chess.engine.search.SearchEngine;
+import chess.engine.evaluation.*;
 import chess.pieces.*;
 
 import java.util.ArrayList;
@@ -91,11 +92,10 @@ public class Main {
                 board.playMove(engineMove);
 
                 System.out.printf(
-                        "Engine plays %s  [depth %d, nodes %,d, score %+.2f]%n%n",
+                        "Engine plays %s  [depth %d, nodes %,d]%n%n",
                         engineSan,
                         result.depth(),
-                        result.nodes(),
-                        result.score() / 100.0
+                        result.nodes()
                 );
                 continue;
             }
@@ -137,7 +137,22 @@ public class Main {
                     continue;
                 }
                 if (input.equalsIgnoreCase("eval")) {
-                    System.out.println(engine.evaluate(board));
+                    System.out.println("Engine is searching...");
+
+                    // Call the search tree instead of the static evaluator
+                    SearchEngine.SearchResult result = engine.findBestMove(
+                            board,
+                            ENGINE_DEPTH,
+                            ENGINE_TIME_MS
+                    );
+
+                    // Print the matched evaluation score
+                    System.out.printf(
+                            "Search Evaluation: %+.2f  [depth %d, nodes %,d]%n",
+                            result.score() / 100.0,
+                            result.depth(),
+                            result.nodes()
+                    );
                     continue;
                 }
 
