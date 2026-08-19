@@ -49,8 +49,8 @@ public class LichessGame {
     /*
      * Fast opening safety check.
      */
-    private static final int OPENING_CHECK_DEPTH = 9;
-    private static final long OPENING_CHECK_TIME_MS = 350;
+    private static final int OPENING_CHECK_DEPTH = 4;
+    private static final long OPENING_CHECK_TIME_MS = 250;
 
     /*
      * Maximum amount of evaluation the opening
@@ -58,7 +58,7 @@ public class LichessGame {
      *
      * 50 centipawns = 0.50 pawns.
      */
-    private static final int MAX_OPENING_LOSS_CP = 35;
+    private static final int MAX_OPENING_LOSS_CP = 40;
 
     public LichessGame(
             String token,
