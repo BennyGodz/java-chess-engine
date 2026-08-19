@@ -43,8 +43,8 @@ public class LichessGame {
     /*
      * Main blitz search.
      */
-    private static final int SEARCH_DEPTH = 6;
-    private static final long SEARCH_TIME_MS = 3000;
+    private static final int SEARCH_DEPTH = 4;
+    private static final long SEARCH_TIME_MS = 300;
 
 
     public LichessGame(
