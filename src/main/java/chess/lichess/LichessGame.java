@@ -49,8 +49,8 @@ public class LichessGame {
     /*
      * Fast opening safety check.
      */
-    private static final int OPENING_CHECK_DEPTH = 5;
-    private static final long OPENING_CHECK_TIME_MS = 150;
+    private static final int OPENING_CHECK_DEPTH = 9;
+    private static final long OPENING_CHECK_TIME_MS = 350;
 
     /*
      * Maximum amount of evaluation the opening
