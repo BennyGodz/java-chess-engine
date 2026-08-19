@@ -46,19 +46,6 @@ public class LichessGame {
     private static final int SEARCH_DEPTH = 6;
     private static final long SEARCH_TIME_MS = 3000;
 
-    /*
-     * Fast opening safety check.
-     */
-    private static final int OPENING_CHECK_DEPTH = 6;
-    private static final long OPENING_CHECK_TIME_MS = 500;
-
-    /*
-     * Maximum amount of evaluation the opening
-     * move is allowed to lose.
-     *
-     * 50 centipawns = 0.50 pawns.
-     */
-    private static final int MAX_OPENING_LOSS_CP = 40;
 
     public LichessGame(
             String token,
@@ -380,12 +367,22 @@ public class LichessGame {
     /**
      * Rebuild board from Lichess UCI moves.
      */
+    /**
+     * Rebuild the board AND opening book history
+     * from Lichess's complete UCI move list.
+     */
     private void rebuildBoardFromMoves(
             String moves
     ) {
 
         board =
                 new Board();
+
+        /*
+         * The opening manager must also start from
+         * the beginning of the game.
+         */
+        openingManager.reset();
 
         if (moves == null
                 || moves.isBlank()) {
@@ -399,10 +396,39 @@ public class LichessGame {
 
         for (String uci : moveList) {
 
-            playUciMove(
-                    board,
-                    uci
+            /*
+             * Get the SAN before playing the move.
+             */
+            Move move =
+                    findMoveFromUci(
+                            board,
+                            uci
+                    );
+
+            if (move == null) {
+
+                throw new IllegalStateException(
+                        "Could not find legal move for UCI: "
+                                + uci
+                                + "\nBoard FEN: "
+                                + board.toFEN()
+                );
+            }
+
+            String san =
+                    board.formatMove(move);
+
+            /*
+             * Record the move in the opening book.
+             */
+            openingManager.recordMove(
+                    san
             );
+
+            /*
+             * Then actually play it.
+             */
+            board.playMove(move);
         }
     }
 
@@ -492,8 +518,19 @@ public class LichessGame {
     /**
      * Choose and send an engine move.
      *
-     * The opening book is treated as a suggestion,
-     * NOT as an absolute command.
+     * The opening book is followed directly while the current
+     * position is still part of an opening line.
+     *
+     * Once the game leaves the book, normal engine search takes over.
+     */
+    /**
+     * Choose and send an engine move.
+     *
+     * The opening book is followed directly while the current
+     * position is still part of an opening line.
+     *
+     * Once the opponent leaves the opening book, normal engine
+     * search takes over.
      */
     private void makeEngineMove() {
 
@@ -527,175 +564,45 @@ public class LichessGame {
         }
 
         /*
-         * Ask opening manager for a candidate.
+         * Follow the opening book directly.
+         *
+         * There is NO engine safety check here.
+         *
+         * If the current position is in the book,
+         * play the book move.
          */
-        Move bookMove = null;
-
         if (openingManager.isOpeningActive()) {
 
-            bookMove =
-                    openingManager.getOpeningMove(
-                            board
-                    );
-        }
+            Move bookMove =
+                    openingManager.getOpeningMove(board);
 
-        /*
-         * If there is no book move,
-         * just search normally.
-         */
-        if (bookMove == null) {
+            if (bookMove != null) {
 
-            playNormalEngineMove();
-
-            return;
-        }
-
-        System.out.println(
-                "Book candidate: "
-                        + board.formatMove(
-                        bookMove
-                )
-        );
-
-        /*
-         * Search current position.
-         */
-        SearchEngine.SearchResult normalResult =
-                engine.findBestMove(
-                        board,
-                        OPENING_CHECK_DEPTH,
-                        OPENING_CHECK_TIME_MS
+                System.out.println(
+                        "Opening book move: "
+                                + board.formatMove(bookMove)
                 );
 
-        Move normalBestMove =
-                normalResult.bestMove();
-
-        if (normalBestMove == null) {
-
-            sendMoveToLichess(
-                    bookMove
-            );
-
-            openingManager.advance();
-
-            return;
-        }
-
-        /*
-         * Copy the board.
-         */
-        Board bookBoard =
-                new Board();
-
-        bookBoard.loadFEN(
-                board.toFEN()
-        );
-
-        /*
-         * Find equivalent book move on the copy.
-         */
-        Move copiedBookMove =
-                findEquivalentMove(
-                        bookBoard,
+                sendMoveToLichess(
                         bookMove
                 );
 
-        /*
-         * Play the book move only on the
-         * temporary board.
-         */
-        bookBoard.playMove(
-                copiedBookMove
-        );
+                return;
+            }
 
-        /*
-         * Search after the book move.
-         *
-         * This score is from the opponent's
-         * perspective.
-         */
-        SearchEngine.SearchResult bookResult =
-                engine.findBestMove(
-                        bookBoard,
-                        OPENING_CHECK_DEPTH,
-                        OPENING_CHECK_TIME_MS
-                );
-
-        /*
-         * Convert back to our perspective.
-         */
-        int normalScore =
-                normalResult.score();
-
-        int bookScore =
-                -bookResult.score();
-
-        int difference =
-                normalScore - bookScore;
-
-        System.out.printf(
-                "Normal: %+.2f%n",
-                normalScore / 100.0
-        );
-
-        System.out.printf(
-                "Book:   %+.2f%n",
-                bookScore / 100.0
-        );
-
-        System.out.printf(
-                "Loss:   %.2f%n",
-                difference / 100.0
-        );
-
-        /*
-         * Safe enough.
-         */
-        if (difference
-                <= MAX_OPENING_LOSS_CP) {
-
+            /*
+             * No book move means the position is
+             * no longer in the opening book.
+             */
             System.out.println(
-                    "BOOK MOVE ACCEPTED"
+                    "Opening book ended."
             );
-
-            sendMoveToLichess(
-                    bookMove
-            );
-
-            openingManager.advance();
-
-            return;
         }
 
         /*
-         * Book move is dangerous.
+         * The opening is over.
+         * Now use the normal search engine.
          */
-        System.out.println();
-        System.out.println(
-                "BOOK MOVE REJECTED"
-        );
-
-        System.out.println(
-                "Opponent's position made "
-                        + "the opening move unsafe."
-        );
-
-        openingManager.disable();
-
-        /*
-         * Use the best move found by the
-         * safety search immediately.
-         */
-        sendMoveToLichess(
-                normalBestMove
-        );
-    }
-
-    /**
-     * Normal full engine search.
-     */
-    private void playNormalEngineMove() {
-
         System.out.println(
                 "Using normal engine search."
         );
@@ -947,5 +854,48 @@ public class LichessGame {
                 eventConsumer.accept(event);
             }
         }
+    }
+    /**
+     * Find a legal Move corresponding to a Lichess UCI move.
+     */
+    private Move findMoveFromUci(
+            Board board,
+            String uci
+    ) {
+
+        if (uci == null
+                || uci.length() < 4) {
+
+            return null;
+        }
+
+        String from =
+                uci.substring(0, 2);
+
+        String to =
+                uci.substring(2, 4);
+
+        char promotion =
+                'Q';
+
+        if (uci.length() >= 5) {
+
+            promotion =
+                    Character.toUpperCase(
+                            uci.charAt(4)
+                    );
+        }
+
+        Position start =
+                algebraicToPosition(from);
+
+        Position end =
+                algebraicToPosition(to);
+
+        return board.findLegalMove(
+                start,
+                end,
+                promotion
+        );
     }
 }
