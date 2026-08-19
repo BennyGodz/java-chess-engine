@@ -156,11 +156,9 @@ public class Evaluator {
                 phase
         );
 
-        score += evaluateKingExposure(
-                board,
-                false,
-                phase
-        );
+        score += evaluateKingExposure(board, false, phase);
+        score += evaluateCentralPawnDevelopment(board, true, phase);
+        score += evaluateCentralPawnDevelopment(board, false, phase);
 
         return score;
     }
@@ -568,6 +566,85 @@ public class Evaluator {
         }
 
         return false;
+    }
+    /**
+     * Strongly rewards central pawn development during the opening.
+     *
+     * White prefers:
+     *     e4 and d4
+     *
+     * Black prefers:
+     *     e5 and d5
+     *
+     * This is intentionally strongest in the opening and fades
+     * during the middlegame.
+     */
+    private int evaluateCentralPawnDevelopment(
+            Board board,
+            boolean isWhite,
+            int phase
+    ) {
+        if (phase != 0) {
+            return 0;
+        }
+
+        int score = 0;
+
+        int pawnRow = isWhite ? 6 : 1;
+
+        /*
+         * White e pawn = e2
+         * White d pawn = d2
+         *
+         * Black e pawn = e7
+         * Black d pawn = d7
+         */
+        Piece dPawn = board.getPiece(
+                new Position(pawnRow, 3)
+        );
+
+        Piece ePawn = board.getPiece(
+                new Position(pawnRow, 4)
+        );
+
+        boolean dPawnHome =
+                dPawn instanceof Pawn
+                        && dPawn.isWhite() == isWhite;
+
+        boolean ePawnHome =
+                ePawn instanceof Pawn
+                        && ePawn.isWhite() == isWhite;
+
+        /*
+         * Reward having moved the d pawn.
+         */
+        if (!dPawnHome) {
+            score += 30;
+        }
+
+        /*
+         * Reward having moved the e pawn.
+         */
+        if (!ePawnHome) {
+            score += 35;
+        }
+
+        /*
+         * Strong extra bonus for having both central pawns advanced.
+         */
+        if (!dPawnHome && !ePawnHome) {
+            score += 25;
+        }
+
+        /*
+         * If neither central pawn has moved, strongly encourage
+         * central pawn development.
+         */
+        if (dPawnHome && ePawnHome) {
+            score -= 20;
+        }
+
+        return isWhite ? score : -score;
     }
     /**
      * Penalizes premature queen deployment.
