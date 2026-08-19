@@ -40,8 +40,8 @@ public class LichessGame {
     /*
      * Adjust these later once we test engine strength.
      */
-    private static final int SEARCH_DEPTH = 5;
-    private static final long SEARCH_TIME_MS = 3000;
+    private static final int SEARCH_DEPTH = 3;
+    private static final long SEARCH_TIME_MS = 100;
 
     public LichessGame(
             String token,
