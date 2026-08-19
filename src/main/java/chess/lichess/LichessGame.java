@@ -3,6 +3,7 @@ package chess.lichess;
 import chess.board.Board;
 import chess.board.Move;
 import chess.board.Position;
+import chess.engine.opening.OpeningManager;
 import chess.engine.search.SearchEngine;
 import chess.pieces.Piece;
 
@@ -31,6 +32,8 @@ public class LichessGame {
     private final SearchEngine engine;
     private final LichessClient lichessClient;
 
+    private final OpeningManager openingManager;
+
     private Board board;
 
     private boolean botIsWhite;
@@ -38,43 +41,70 @@ public class LichessGame {
     private boolean gameStarted = false;
 
     /*
-     * Adjust these later once we test engine strength.
+     * Main blitz search.
      */
-    private static final int SEARCH_DEPTH = 3;
-    private static final long SEARCH_TIME_MS = 100;
+    private static final int SEARCH_DEPTH = 9;
+    private static final long SEARCH_TIME_MS = 1000;
+
+    /*
+     * Fast opening safety check.
+     */
+    private static final int OPENING_CHECK_DEPTH = 5;
+    private static final long OPENING_CHECK_TIME_MS = 150;
+
+    /*
+     * Maximum amount of evaluation the opening
+     * move is allowed to lose.
+     *
+     * 50 centipawns = 0.50 pawns.
+     */
+    private static final int MAX_OPENING_LOSS_CP = 35;
 
     public LichessGame(
             String token,
             String gameId
     ) {
+
         this.token = token;
         this.gameId = gameId;
 
-        this.httpClient = HttpClient.newHttpClient();
-        this.mapper = new ObjectMapper();
+        this.httpClient =
+                HttpClient.newHttpClient();
 
-        this.engine = new SearchEngine();
-        this.lichessClient = new LichessClient(token);
+        this.mapper =
+                new ObjectMapper();
 
-        this.board = new Board();
+        this.engine =
+                new SearchEngine();
+
+        this.lichessClient =
+                new LichessClient(token);
+
+        this.openingManager =
+                new OpeningManager();
+
+        this.board =
+                new Board();
     }
 
     /**
-     * Connect to the Lichess game event stream.
+     * Connect to Lichess game stream.
      */
-    public void stream() throws IOException, InterruptedException {
+    public void stream()
+            throws IOException, InterruptedException {
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(
-                        "https://lichess.org/api/bot/game/stream/"
-                                + gameId
-                ))
-                .header(
-                        "Authorization",
-                        "Bearer " + token
-                )
-                .GET()
-                .build();
+        HttpRequest request =
+                HttpRequest.newBuilder()
+                        .uri(URI.create(
+                                "https://lichess.org/api/bot/game/stream/"
+                                        + gameId
+                        ))
+                        .header(
+                                "Authorization",
+                                "Bearer " + token
+                        )
+                        .GET()
+                        .build();
 
         HttpResponse<InputStream> response =
                 httpClient.send(
@@ -83,6 +113,7 @@ public class LichessGame {
                 );
 
         if (response.statusCode() != 200) {
+
             throw new IOException(
                     "Game stream failed. HTTP "
                             + response.statusCode()
@@ -104,7 +135,8 @@ public class LichessGame {
                     continue;
                 }
 
-                JsonNode event = mapper.readTree(line);
+                JsonNode event =
+                        mapper.readTree(line);
 
                 handleEvent(event);
             }
@@ -112,16 +144,21 @@ public class LichessGame {
     }
 
     /**
-     * Handle every event received from the game stream.
+     * Handle Lichess events.
      */
-    private void handleEvent(JsonNode event) {
+    private void handleEvent(
+            JsonNode event
+    ) {
 
-        String type = event.has("type")
-                ? event.get("type").asText()
-                : "";
+        String type =
+                event.has("type")
+                        ? event.get("type").asText()
+                        : "";
 
         System.out.println();
-        System.out.println("GAME EVENT: " + type);
+        System.out.println(
+                "GAME EVENT: " + type
+        );
 
         switch (type) {
 
@@ -134,19 +171,25 @@ public class LichessGame {
                 break;
 
             case "chatLine":
+
                 System.out.println(
                         "Chat: " + event
                 );
+
                 break;
 
             case "opponentGone":
+
                 System.out.println(
                         "Opponent gone: "
-                                + event.get("gone").asBoolean()
+                                + event.get("gone")
+                                .asBoolean()
                 );
+
                 break;
 
             default:
+
                 System.out.println(
                         event.toPrettyString()
                 );
@@ -154,93 +197,131 @@ public class LichessGame {
     }
 
     /**
-     * First event received when joining the game.
+     * Initial game event.
      */
-    private void handleGameFull(JsonNode event) {
+    private void handleGameFull(
+            JsonNode event
+    ) {
 
         gameStarted = true;
 
-        JsonNode white = event.get("white");
-        JsonNode black = event.get("black");
+        JsonNode white =
+                event.get("white");
 
-        String whiteId = white.has("id")
-                ? white.get("id").asText()
-                : "";
+        JsonNode black =
+                event.get("black");
 
-        String blackId = black.has("id")
-                ? black.get("id").asText()
-                : "";
+        String whiteId =
+                white.has("id")
+                        ? white.get("id").asText()
+                        : "";
 
-        String myId = getMyBotId();
+        String blackId =
+                black.has("id")
+                        ? black.get("id").asText()
+                        : "";
 
-        botIsWhite = whiteId.equalsIgnoreCase(myId);
+        String myId =
+                getMyBotId();
+
+        botIsWhite =
+                whiteId.equalsIgnoreCase(myId);
 
         System.out.println(
                 "Bot color: "
-                        + (botIsWhite ? "White" : "Black")
+                        + (botIsWhite
+                        ? "White"
+                        : "Black")
         );
 
         String initialFen =
                 event.get("initialFen").asText();
 
         System.out.println(
-                "Initial FEN: " + initialFen
+                "Initial FEN: "
+                        + initialFen
         );
 
         /*
-         * Load starting position.
+         * Create the starting board.
          */
-        if (initialFen.equals("startpos")) {
-            board = new Board();
-        } else {
-            board = new Board();
-            board.loadFEN(initialFen);
+        board =
+                new Board();
+
+        if (!initialFen.equals("startpos")) {
+
+            board.loadFEN(
+                    initialFen
+            );
         }
 
-        /*
-         * gameFull contains a state object with the moves
-         * that have already happened.
-         */
-        JsonNode state = event.get("state");
+        JsonNode state =
+                event.get("state");
 
-        if (state != null && state.has("moves")) {
+        String moves = "";
 
-            String moves = state.get("moves").asText();
+        if (state != null
+                && state.has("moves")) {
+
+            moves =
+                    state.get("moves").asText();
 
             if (!moves.isBlank()) {
-                rebuildBoardFromMoves(moves);
+
+                rebuildBoardFromMoves(
+                        moves
+                );
             }
         }
 
         System.out.println();
-        System.out.println("GAME STARTED!");
         System.out.println(
-                "Game ID: " + gameId
+                "GAME STARTED!"
         );
 
-        board.printBoard(botIsWhite);
+        System.out.println(
+                "Game ID: "
+                        + gameId
+        );
+
+        System.out.println(
+                "Opening: "
+                        + openingManager
+                        .getOpeningName()
+        );
+
+        board.printBoard(
+                botIsWhite
+        );
 
         /*
-         * If BugaBot is White, it may need to make
-         * the first move immediately.
+         * If it is our turn, make the move.
+         *
+         * This works for White and Black.
          */
-        if (board.isWhiteToMove() == botIsWhite) {
+        if (board.isWhiteToMove()
+                == botIsWhite) {
+
             makeEngineMove();
         }
     }
 
     /**
-     * Handle subsequent gameState events.
+     * Handle later game states.
      */
-    private void handleGameState(JsonNode event) {
+    private void handleGameState(
+            JsonNode event
+    ) {
 
-        String moves = event.has("moves")
-                ? event.get("moves").asText()
-                : "";
+        String moves =
+                event.has("moves")
+                        ? event.get("moves").asText()
+                        : "";
 
-        String status = event.has("status")
-                ? event.get("status").asText()
-                : "";
+        String status =
+                event.has("status")
+                        ? event.get("status").asText()
+                        : "";
 
         System.out.println(
                 "Moves: " + moves
@@ -250,32 +331,46 @@ public class LichessGame {
                 "Status: " + status
         );
 
-        /*
-         * These indicate the game has ended.
-         */
         if (!status.equals("started")) {
 
             System.out.println(
-                    "Game finished: " + status
+                    "Game finished: "
+                            + status
             );
 
             return;
         }
 
         /*
-         * Rebuild our Board from the complete move list.
+         * Always reconstruct the board from
+         * Lichess's complete move list.
          */
-        rebuildBoardFromMoves(moves);
+        rebuildBoardFromMoves(
+                moves
+        );
 
         System.out.println();
-        board.printBoard(botIsWhite);
+
+        board.printBoard(
+                botIsWhite
+        );
+
+        System.out.println(
+                "Opening: "
+                        + openingManager
+                        .getOpeningName()
+        );
 
         /*
-         * Check whether it is our turn.
+         * Only move when it is our turn.
          */
-        if (board.isWhiteToMove() == botIsWhite) {
+        if (board.isWhiteToMove()
+                == botIsWhite) {
+
             makeEngineMove();
+
         } else {
+
             System.out.println(
                     "Waiting for opponent..."
             );
@@ -283,34 +378,36 @@ public class LichessGame {
     }
 
     /**
-     * Reconstruct the current chess position from
-     * Lichess's UCI move list.
+     * Rebuild board from Lichess UCI moves.
      */
-    private void rebuildBoardFromMoves(String moves) {
+    private void rebuildBoardFromMoves(
+            String moves
+    ) {
 
-        board = new Board();
+        board =
+                new Board();
 
-        if (moves == null || moves.isBlank()) {
+        if (moves == null
+                || moves.isBlank()) {
+
             return;
         }
 
         String[] moveList =
-                moves.trim().split("\\s+");
+                moves.trim()
+                        .split("\\s+");
 
         for (String uci : moveList) {
-            playUciMove(board, uci);
+
+            playUciMove(
+                    board,
+                    uci
+            );
         }
     }
 
     /**
-     * Apply one UCI move to our Board.
-     *
-     * Example:
-     *
-     * e2e4
-     * e7e5
-     * g1f3
-     * e7e8q
+     * Apply a Lichess UCI move.
      */
     private void playUciMove(
             Board board,
@@ -318,17 +415,23 @@ public class LichessGame {
     ) {
 
         if (uci.length() < 4) {
+
             throw new IllegalArgumentException(
-                    "Invalid UCI move: " + uci
+                    "Invalid UCI move: "
+                            + uci
             );
         }
 
-        String from = uci.substring(0, 2);
-        String to = uci.substring(2, 4);
+        String from =
+                uci.substring(0, 2);
+
+        String to =
+                uci.substring(2, 4);
 
         char promotion = 'Q';
 
         if (uci.length() >= 5) {
+
             promotion =
                     Character.toUpperCase(
                             uci.charAt(4)
@@ -336,10 +439,14 @@ public class LichessGame {
         }
 
         Position start =
-                algebraicToPosition(from);
+                algebraicToPosition(
+                        from
+                );
 
         Position end =
-                algebraicToPosition(to);
+                algebraicToPosition(
+                        to
+                );
 
         Move move =
                 board.findLegalMove(
@@ -349,6 +456,7 @@ public class LichessGame {
                 );
 
         if (move == null) {
+
             throw new IllegalStateException(
                     "Could not find legal move for UCI: "
                             + uci
@@ -361,7 +469,7 @@ public class LichessGame {
     }
 
     /**
-     * Convert "e2" into your Board coordinates.
+     * Convert e2 into Board coordinates.
      */
     private Position algebraicToPosition(
             String square
@@ -375,11 +483,17 @@ public class LichessGame {
                         square.charAt(1)
                 );
 
-        return new Position(row, column);
+        return new Position(
+                row,
+                column
+        );
     }
 
     /**
-     * Ask the actual chess engine for a move.
+     * Choose and send an engine move.
+     *
+     * The opening book is treated as a suggestion,
+     * NOT as an absolute command.
      */
     private void makeEngineMove() {
 
@@ -387,26 +501,204 @@ public class LichessGame {
         System.out.println(
                 "================================"
         );
+
         System.out.println(
                 "ENGINE THINKING..."
         );
+
         System.out.println(
                 "================================"
         );
 
         System.out.println(
-                "Position: " + board.toFEN()
+                "Position: "
+                        + board.toFEN()
         );
 
-        boolean engineWhite =
-                board.isWhiteToMove();
+        if (board.isWhiteToMove()
+                != botIsWhite) {
 
-        if (engineWhite != botIsWhite) {
             System.out.println(
-                    "ERROR: It is not the engine's turn."
+                    "ERROR: It is not "
+                            + "the engine's turn."
             );
+
             return;
         }
+
+        /*
+         * Ask opening manager for a candidate.
+         */
+        Move bookMove = null;
+
+        if (openingManager.isOpeningActive()) {
+
+            bookMove =
+                    openingManager.getOpeningMove(
+                            board
+                    );
+        }
+
+        /*
+         * If there is no book move,
+         * just search normally.
+         */
+        if (bookMove == null) {
+
+            playNormalEngineMove();
+
+            return;
+        }
+
+        System.out.println(
+                "Book candidate: "
+                        + board.formatMove(
+                        bookMove
+                )
+        );
+
+        /*
+         * Search current position.
+         */
+        SearchEngine.SearchResult normalResult =
+                engine.findBestMove(
+                        board,
+                        OPENING_CHECK_DEPTH,
+                        OPENING_CHECK_TIME_MS
+                );
+
+        Move normalBestMove =
+                normalResult.bestMove();
+
+        if (normalBestMove == null) {
+
+            sendMoveToLichess(
+                    bookMove
+            );
+
+            openingManager.advance();
+
+            return;
+        }
+
+        /*
+         * Copy the board.
+         */
+        Board bookBoard =
+                new Board();
+
+        bookBoard.loadFEN(
+                board.toFEN()
+        );
+
+        /*
+         * Find equivalent book move on the copy.
+         */
+        Move copiedBookMove =
+                findEquivalentMove(
+                        bookBoard,
+                        bookMove
+                );
+
+        /*
+         * Play the book move only on the
+         * temporary board.
+         */
+        bookBoard.playMove(
+                copiedBookMove
+        );
+
+        /*
+         * Search after the book move.
+         *
+         * This score is from the opponent's
+         * perspective.
+         */
+        SearchEngine.SearchResult bookResult =
+                engine.findBestMove(
+                        bookBoard,
+                        OPENING_CHECK_DEPTH,
+                        OPENING_CHECK_TIME_MS
+                );
+
+        /*
+         * Convert back to our perspective.
+         */
+        int normalScore =
+                normalResult.score();
+
+        int bookScore =
+                -bookResult.score();
+
+        int difference =
+                normalScore - bookScore;
+
+        System.out.printf(
+                "Normal: %+.2f%n",
+                normalScore / 100.0
+        );
+
+        System.out.printf(
+                "Book:   %+.2f%n",
+                bookScore / 100.0
+        );
+
+        System.out.printf(
+                "Loss:   %.2f%n",
+                difference / 100.0
+        );
+
+        /*
+         * Safe enough.
+         */
+        if (difference
+                <= MAX_OPENING_LOSS_CP) {
+
+            System.out.println(
+                    "BOOK MOVE ACCEPTED"
+            );
+
+            sendMoveToLichess(
+                    bookMove
+            );
+
+            openingManager.advance();
+
+            return;
+        }
+
+        /*
+         * Book move is dangerous.
+         */
+        System.out.println();
+        System.out.println(
+                "BOOK MOVE REJECTED"
+        );
+
+        System.out.println(
+                "Opponent's position made "
+                        + "the opening move unsafe."
+        );
+
+        openingManager.disable();
+
+        /*
+         * Use the best move found by the
+         * safety search immediately.
+         */
+        sendMoveToLichess(
+                normalBestMove
+        );
+    }
+
+    /**
+     * Normal full engine search.
+     */
+    private void playNormalEngineMove() {
+
+        System.out.println(
+                "Using normal engine search."
+        );
 
         SearchEngine.SearchResult result =
                 engine.findBestMove(
@@ -415,58 +707,67 @@ public class LichessGame {
                         SEARCH_TIME_MS
                 );
 
-        Move bestMove = result.bestMove();
+        Move bestMove =
+                result.bestMove();
 
         if (bestMove == null) {
+
             System.out.println(
                     "Engine found no legal move."
             );
+
             return;
         }
 
+        System.out.printf(
+                "Engine search depth: %d%n",
+                result.depth()
+        );
+
+        System.out.printf(
+                "Nodes: %,d%n",
+                result.nodes()
+        );
+
+        System.out.printf(
+                "Score: %+.2f%n",
+                result.score() / 100.0
+        );
+
+        sendMoveToLichess(
+                bestMove
+        );
+    }
+
+    /**
+     * Send a move to Lichess.
+     */
+    private void sendMoveToLichess(
+            Move move
+    ) {
+
         String san =
-                board.formatMove(bestMove);
+                board.formatMove(move);
 
         String uci =
-                moveToUci(bestMove);
+                moveToUci(move);
 
         System.out.println(
-                "Engine move: " + san
+                "Engine move: "
+                        + san
         );
 
         System.out.println(
-                "UCI move: " + uci
+                "UCI move: "
+                        + uci
         );
 
-        System.out.println(
-                "Depth: " + result.depth()
-        );
-
-        System.out.println(
-                "Nodes: " + result.nodes()
-        );
-
-        System.out.println(
-                "Score: " + result.score()
-        );
-
-        /*
-         * Send the move to Lichess.
-         */
         try {
 
             lichessClient.makeMove(
                     gameId,
                     uci
             );
-
-            /*
-             * Do NOT call board.playMove() here.
-             *
-             * Lichess will send a new gameState event
-             * containing the move. That event will rebuild
-             * the Board.
-             */
 
         } catch (Exception e) {
 
@@ -479,27 +780,67 @@ public class LichessGame {
     }
 
     /**
-     * Convert your Move object into Lichess UCI notation.
-     *
-     * e2 -> e4 becomes:
-     *
-     * e2e4
-     *
-     * Promotion:
-     *
-     * e7 -> e8 = queen
-     *
-     * becomes:
-     *
-     * e7e8q
+     * Find equivalent move on another board.
      */
-    private String moveToUci(Move move) {
+    private Move findEquivalentMove(
+            Board board,
+            Move original
+    ) {
+
+        for (Move move :
+                board.getLegalMoves(
+                        board.isWhiteToMove()
+                )) {
+
+            if (!move.getStart()
+                    .equals(original.getStart())) {
+                continue;
+            }
+
+            if (!move.getEnd()
+                    .equals(original.getEnd())) {
+                continue;
+            }
+
+            if (move.isPromotion()
+                    != original.isPromotion()) {
+                continue;
+            }
+
+            if (move.isPromotion()) {
+
+                if (move.getPromotionPiece()
+                        .getNotationSymbol()
+                        != original
+                        .getPromotionPiece()
+                        .getNotationSymbol()) {
+
+                    continue;
+                }
+            }
+
+            return move;
+        }
+
+        throw new IllegalStateException(
+                "Could not recreate opening move."
+        );
+    }
+
+    /**
+     * Convert Move to UCI.
+     */
+    private String moveToUci(
+            Move move
+    ) {
 
         String from =
-                move.getStart().toAlgebraic();
+                move.getStart()
+                        .toAlgebraic();
 
         String to =
-                move.getEnd().toAlgebraic();
+                move.getEnd()
+                        .toAlgebraic();
 
         String uci =
                 from + to;
@@ -511,15 +852,28 @@ public class LichessGame {
 
             char promotion;
 
-            if (promotionPiece.getNotationSymbol() == 'Q') {
+            if (promotionPiece
+                    .getNotationSymbol() == 'Q') {
+
                 promotion = 'q';
-            } else if (promotionPiece.getNotationSymbol() == 'R') {
+
+            } else if (promotionPiece
+                    .getNotationSymbol() == 'R') {
+
                 promotion = 'r';
-            } else if (promotionPiece.getNotationSymbol() == 'B') {
+
+            } else if (promotionPiece
+                    .getNotationSymbol() == 'B') {
+
                 promotion = 'b';
-            } else if (promotionPiece.getNotationSymbol() == 'N') {
+
+            } else if (promotionPiece
+                    .getNotationSymbol() == 'N') {
+
                 promotion = 'n';
+
             } else {
+
                 throw new IllegalStateException(
                         "Unknown promotion piece."
                 );
@@ -532,17 +886,14 @@ public class LichessGame {
     }
 
     /**
-     * Get the bot's own Lichess username.
-     *
-     * This assumes the account is BugaBot.
+     * Bot username.
      */
     private String getMyBotId() {
         return "bugabot";
     }
 
     /**
-     * Optional callback version if your existing code uses
-     * LichessGame.stream(Consumer<JsonNode>).
+     * Callback stream.
      */
     public void stream(
             Consumer<JsonNode> eventConsumer
@@ -568,6 +919,7 @@ public class LichessGame {
                 );
 
         if (response.statusCode() != 200) {
+
             throw new IOException(
                     "Game stream failed. HTTP "
                             + response.statusCode()
