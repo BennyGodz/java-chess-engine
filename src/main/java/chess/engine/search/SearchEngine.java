@@ -17,28 +17,35 @@ import java.util.List;
  * Alpha beta pruning
  * Quiescence search
  * Tactical move ordering
+ * Check extensions
  *
- * The evaluator handles positional decisions such as:
- * development
- * center control
- * king safety
- * queen development
- * knight placement
+ * The evaluator handles positional decisions.
  *
- * This class focuses primarily on calculating tactics and variations.
+ * This class focuses primarily on calculating tactics,
+ * forcing sequences, checks, captures, and mating attacks.
  */
 public class SearchEngine {
 
     public static final int MATE_SCORE = 100_000;
+
     private static final int INFINITY = 1_000_000;
+
+    /*
+     * Maximum number of check extensions allowed
+     * in one variation.
+     */
+    private static final int MAX_CHECK_EXTENSIONS = 8;
 
     /*
      * Maximum depth of quiescence search.
      *
-     * Without a limit, a sequence of checks can cause
-     * quiescence to recurse indefinitely.
+     * This is necessary because checks and captures can
+     * create very long tactical sequences.
+     *
+     * Without a limit, quiescence can recurse forever
+     * and eventually cause StackOverflowError.
      */
-    private static final int MAX_QUIESCENCE_DEPTH = 12;
+    private static final int MAX_QUIESCENCE_DEPTH = 8;
 
     private final Evaluator evaluator;
 
@@ -63,35 +70,49 @@ public class SearchEngine {
     ) {
 
         List<Move> legalMoves =
-                board.getLegalMoves(board.isWhiteToMove());
+                board.getLegalMoves(
+                        board.isWhiteToMove()
+                );
 
         if (legalMoves.isEmpty()) {
-            return new SearchResult(null, 0, 0, 0);
+
+            return new SearchResult(
+                    null,
+                    0,
+                    0,
+                    0
+            );
         }
 
         nodes = 0;
 
         deadlineNanos =
                 System.nanoTime()
-                        + Math.max(1, timeLimitMillis) * 1_000_000L;
+                        + Math.max(
+                        1,
+                        timeLimitMillis
+                ) * 1_000_000L;
 
-        Move bestMove = legalMoves.get(0);
+        Move bestMove =
+                legalMoves.get(0);
 
         int bestScore =
-                board.isWhiteToMove()
-                        ? -INFINITY
-                        : INFINITY;
+                -INFINITY;
 
         int completedDepth = 0;
 
         /*
          * Iterative deepening.
          *
-         * If the clock expires during a deeper search,
+         * If time expires during a deeper search,
          * the result from the previous completed depth
-         * remains valid.
+         * is kept.
          */
-        for (int depth = 1; depth <= maxDepth; depth++) {
+        for (
+                int depth = 1;
+                depth <= maxDepth;
+                depth++
+        ) {
 
             try {
 
@@ -102,11 +123,18 @@ public class SearchEngine {
                                 bestMove
                         );
 
-                bestMove = result.move;
-                bestScore = result.score;
-                completedDepth = depth;
+                bestMove =
+                        result.move;
 
-            } catch (SearchTimeoutException e) {
+                bestScore =
+                        result.score;
+
+                completedDepth =
+                        depth;
+
+            } catch (
+                    SearchTimeoutException e
+            ) {
 
                 break;
             }
@@ -132,10 +160,16 @@ public class SearchEngine {
         checkTime();
 
         List<Move> moves =
-                board.getLegalMoves(board.isWhiteToMove());
+                board.getLegalMoves(
+                        board.isWhiteToMove()
+                );
 
         if (moves.isEmpty()) {
-            return new RootResult(null, 0);
+
+            return new RootResult(
+                    null,
+                    0
+            );
         }
 
         orderMoves(
@@ -144,37 +178,65 @@ public class SearchEngine {
                 previousBest
         );
 
-        Move bestMove = moves.get(0);
+        Move bestMove =
+                moves.get(0);
 
-        int bestScore = -INFINITY;
+        int bestScore =
+                -INFINITY;
 
-        int alpha = -INFINITY;
-        int beta = INFINITY;
+        int alpha =
+                -INFINITY;
+
+        int beta =
+                INFINITY;
 
         for (Move move : moves) {
 
             checkTime();
 
             Board child =
-                    board.copyAndPlayMoveForSearch(move);
+                    board.copyAndPlayMoveForSearch(
+                            move
+                    );
+
+            /*
+             * Give checking moves an extension.
+             */
+            boolean givesCheck =
+                    child.isInCheck(
+                            child.isWhiteToMove()
+                    );
+
+            int extension =
+                    givesCheck
+                            ? 1
+                            : 0;
 
             int score =
                     -negamax(
                             child,
-                            depth - 1,
+                            depth - 1 + extension,
                             -beta,
                             -alpha,
-                            1
+                            1,
+                            givesCheck
+                                    ? 1
+                                    : 0
                     );
 
             if (score > bestScore) {
 
-                bestScore = score;
-                bestMove = move;
+                bestScore =
+                        score;
+
+                bestMove =
+                        move;
             }
 
             if (score > alpha) {
-                alpha = score;
+
+                alpha =
+                        score;
             }
         }
 
@@ -189,13 +251,16 @@ public class SearchEngine {
      *
      * Scores are always returned from the perspective
      * of the side whose turn it is.
+     *
+     * Checking moves receive search extensions.
      */
     private int negamax(
             Board board,
             int depth,
             int alpha,
             int beta,
-            int ply
+            int ply,
+            int checkExtensions
     ) {
 
         nodes++;
@@ -215,6 +280,9 @@ public class SearchEngine {
 
             if (board.isInCheck(side)) {
 
+                /*
+                 * Mate sooner is better for the attacker.
+                 */
                 return -MATE_SCORE + ply;
             }
 
@@ -224,17 +292,19 @@ public class SearchEngine {
         /*
          * Draw detection.
          */
-        if (board.isSeventyFiveMoveRule()
-                || board.isFivefoldRepetition()
-                || board.isFiftyMoveRule()
-                || board.isThreefoldRepetition()
-                || board.isInsufficientMaterial()) {
+        if (
+                board.isSeventyFiveMoveRule()
+                        || board.isFivefoldRepetition()
+                        || board.isFiftyMoveRule()
+                        || board.isThreefoldRepetition()
+                        || board.isInsufficientMaterial()
+        ) {
 
             return 0;
         }
 
         /*
-         * Reached the leaf.
+         * Leaf node.
          */
         if (depth <= 0) {
 
@@ -247,42 +317,82 @@ public class SearchEngine {
             );
         }
 
+        /*
+         * Tactical move ordering.
+         */
         orderMoves(
                 board,
                 moves,
                 null
         );
 
-        int best = -INFINITY;
+        int best =
+                -INFINITY;
 
         for (Move move : moves) {
 
             checkTime();
 
             Board child =
-                    board.copyAndPlayMoveForSearch(move);
+                    board.copyAndPlayMoveForSearch(
+                            move
+                    );
+
+            /*
+             * Determine whether the move gives check.
+             */
+            boolean givesCheck =
+                    child.isInCheck(
+                            child.isWhiteToMove()
+                    );
+
+            /*
+             * Check extension.
+             */
+            int extension = 0;
+
+            int newCheckExtensions =
+                    checkExtensions;
+
+            if (
+                    givesCheck
+                            && checkExtensions
+                            < MAX_CHECK_EXTENSIONS
+            ) {
+
+                extension = 1;
+
+                newCheckExtensions =
+                        checkExtensions + 1;
+            }
 
             int score =
                     -negamax(
                             child,
-                            depth - 1,
+                            depth - 1 + extension,
                             -beta,
                             -alpha,
-                            ply + 1
+                            ply + 1,
+                            newCheckExtensions
                     );
 
             if (score > best) {
-                best = score;
+
+                best =
+                        score;
             }
 
             if (score > alpha) {
-                alpha = score;
+
+                alpha =
+                        score;
             }
 
             /*
              * Beta cutoff.
              */
             if (alpha >= beta) {
+
                 break;
             }
         }
@@ -293,19 +403,19 @@ public class SearchEngine {
     /**
      * Quiescence search.
      *
-     * Continues calculating tactical positions instead
-     * of evaluating immediately after a capture.
+     * Continues searching tactical positions instead
+     * of stopping immediately after a capture.
      *
-     * Quiescence also considers checks, but only up to
-     * MAX_QUIESCENCE_DEPTH. This prevents endless sequences
-     * of checking moves from overflowing the Java stack.
+     * The search is limited by MAX_QUIESCENCE_DEPTH
+     * so that endless tactical sequences cannot cause
+     * a StackOverflowError.
      */
     private int quiescence(
             Board board,
             int alpha,
             int beta,
             int ply,
-            int qDepth
+            int quiescenceDepth
     ) {
 
         nodes++;
@@ -321,12 +431,13 @@ public class SearchEngine {
         /*
          * Checkmate or stalemate.
          *
-         * This must be checked before the quiescence
-         * depth limit because checkmate is always tactical.
+         * This must happen before the depth cutoff so
+         * that checkmate is still recognized correctly.
          */
         if (legalMoves.isEmpty()) {
 
             if (board.isInCheck(side)) {
+
                 return -MATE_SCORE + ply;
             }
 
@@ -334,27 +445,28 @@ public class SearchEngine {
         }
 
         /*
-         * Safety limit for quiescence.
+         * If the quiescence depth limit has been reached,
+         * stop searching and use the static evaluation.
          *
-         * Once we have gone deep enough into a tactical
-         * sequence, stop recursively searching.
-         *
-         * This is especially important because checks can
-         * create long or repeating tactical sequences.
+         * This prevents infinite recursion from long
+         * sequences of checks or captures.
          */
-        if (qDepth >= MAX_QUIESCENCE_DEPTH) {
-
-            int evaluation =
-                    evaluator.evaluate(board);
+        if (
+                quiescenceDepth
+                        >= MAX_QUIESCENCE_DEPTH
+        ) {
 
             return side
-                    ? evaluation
-                    : -evaluation;
+                    ? evaluator.evaluate(board)
+                    : -evaluator.evaluate(board);
         }
 
         /*
-         * If in check, every legal move is a possible
-         * check evasion and therefore must be considered.
+         * If in check, every legal evasion must be searched.
+         *
+         * We cannot use stand-pat here because being in
+         * check means the current position cannot simply
+         * be evaluated without making a move.
          */
         if (board.isInCheck(side)) {
 
@@ -364,12 +476,15 @@ public class SearchEngine {
                     null
             );
 
-            for (Move move : legalMoves) {
+            for (Move move :
+                    legalMoves) {
 
                 checkTime();
 
                 Board child =
-                        board.copyAndPlayMoveForSearch(move);
+                        board.copyAndPlayMoveForSearch(
+                                move
+                        );
 
                 int score =
                         -quiescence(
@@ -377,15 +492,18 @@ public class SearchEngine {
                                 -beta,
                                 -alpha,
                                 ply + 1,
-                                qDepth + 1
+                                quiescenceDepth + 1
                         );
 
                 if (score >= beta) {
+
                     return beta;
                 }
 
                 if (score > alpha) {
-                    alpha = score;
+
+                    alpha =
+                            score;
                 }
             }
 
@@ -400,37 +518,43 @@ public class SearchEngine {
                         ? evaluator.evaluate(board)
                         : -evaluator.evaluate(board);
 
-        /*
-         * If the static evaluation is already good enough
-         * to cause a beta cutoff, no tactical continuation
-         * needs to be searched.
-         */
         if (standPat >= beta) {
+
             return beta;
         }
 
         if (standPat > alpha) {
-            alpha = standPat;
+
+            alpha =
+                    standPat;
         }
 
         /*
-         * Only investigate forcing moves.
+         * Search tactical moves.
          */
         List<Move> tactical =
                 new ArrayList<>();
 
-        for (Move move : legalMoves) {
+        for (Move move :
+                legalMoves) {
 
-            if (isTactical(board, move)) {
+            if (
+                    isTactical(
+                            board,
+                            move
+                    )
+            ) {
+
                 tactical.add(move);
             }
         }
 
         /*
-         * If there are no tactical moves, this is a quiet
-         * position and the static evaluation is sufficient.
+         * If there are no tactical moves, the position
+         * is quiet enough to stop.
          */
         if (tactical.isEmpty()) {
+
             return alpha;
         }
 
@@ -440,12 +564,15 @@ public class SearchEngine {
                 null
         );
 
-        for (Move move : tactical) {
+        for (Move move :
+                tactical) {
 
             checkTime();
 
             Board child =
-                    board.copyAndPlayMoveForSearch(move);
+                    board.copyAndPlayMoveForSearch(
+                            move
+                    );
 
             int score =
                     -quiescence(
@@ -453,15 +580,18 @@ public class SearchEngine {
                             -beta,
                             -alpha,
                             ply + 1,
-                            qDepth + 1
+                            quiescenceDepth + 1
                     );
 
             if (score >= beta) {
+
                 return beta;
             }
 
             if (score > alpha) {
-                alpha = score;
+
+                alpha =
+                        score;
             }
         }
 
@@ -469,70 +599,57 @@ public class SearchEngine {
     }
 
     /**
-     * Tactical moves are:
+     * Determine whether a move is tactical.
+     *
+     * Tactical moves include:
      *
      * captures
      * promotions
      * en passant
      * checks
-     *
-     * Checks are detected by making the move once.
-     *
-     * This is only used in quiescence, so the extra board
-     * copy is worthwhile because it prevents the engine
-     * from stopping in tactical positions.
      */
     private boolean isTactical(
             Board board,
             Move move
     ) {
 
-        /*
-         * Promotions are always tactical.
-         */
         if (move.isPromotion()) {
+
             return true;
         }
 
-        /*
-         * En passant is always tactical.
-         */
         if (move.isEnPassant()) {
+
             return true;
         }
 
         /*
          * Normal capture.
          */
-        if (board.getPiece(move.getEnd()) != null) {
+        if (
+                board.getPiece(
+                        move.getEnd()
+                ) != null
+        ) {
+
             return true;
         }
 
         /*
-         * Detect checks.
-         *
-         * This is intentionally NOT used during normal
-         * move ordering because doing so for every move
-         * at every search node is expensive.
+         * Check detection.
          */
         Board child =
-                board.copyAndPlayMoveForSearch(move);
+                board.copyAndPlayMoveForSearch(
+                        move
+                );
 
-        return child.isInCheck(child.isWhiteToMove());
+        return child.isInCheck(
+                child.isWhiteToMove()
+        );
     }
 
     /**
      * Move ordering.
-     *
-     * Good ordering is extremely important for alpha beta.
-     *
-     * Priority:
-     *
-     * 1. Previous principal variation move
-     * 2. Promotions
-     * 3. Captures
-     * 4. Castling
-     * 5. Quiet moves
      */
     private void orderMoves(
             Board board,
@@ -553,10 +670,10 @@ public class SearchEngine {
     }
 
     /**
-     * Score a move for search ordering.
+     * Score a move for ordering.
      *
-     * This does NOT determine whether the move is good.
-     * It only determines which move should be searched first.
+     * This does not determine whether a move is good.
+     * It determines which moves are searched first.
      */
     private int moveOrderingScore(
             Board board,
@@ -568,15 +685,14 @@ public class SearchEngine {
 
         /*
          * Previous best move.
-         *
-         * Searching this first gives alpha beta a much
-         * better chance of producing cutoffs.
          */
-        if (principalVariationMove != null
-                && sameMove(
-                move,
-                principalVariationMove
-        )) {
+        if (
+                principalVariationMove != null
+                        && sameMove(
+                        move,
+                        principalVariationMove
+                )
+        ) {
 
             score += 1_000_000;
         }
@@ -588,23 +704,25 @@ public class SearchEngine {
 
             score +=
                     80_000
-                            + move.getPromotionPiece().getValue();
+                            + move
+                            .getPromotionPiece()
+                            .getValue();
         }
 
         /*
          * Captures.
-         *
-         * MVV LVA:
-         * Most Valuable Victim
-         * Least Valuable Attacker
          */
         Piece captured =
-                board.getPiece(move.getEnd());
+                board.getPiece(
+                        move.getEnd()
+                );
 
         if (captured != null) {
 
             Piece attacker =
-                    board.getPiece(move.getStart());
+                    board.getPiece(
+                            move.getStart()
+                    );
 
             int attackerValue =
                     attacker == null
@@ -621,14 +739,33 @@ public class SearchEngine {
          * En passant.
          */
         if (move.isEnPassant()) {
+
             score += 50_000;
         }
 
         /*
-         * Castling is a useful quiet move.
+         * Castling.
          */
         if (move.isCastling()) {
+
             score += 2_000;
+        }
+
+        /*
+         * Checks should be searched very early.
+         */
+        Board child =
+                board.copyAndPlayMoveForSearch(
+                        move
+                );
+
+        if (
+                child.isInCheck(
+                        child.isWhiteToMove()
+                )
+        ) {
+
+            score += 40_000;
         }
 
         return score;
@@ -642,36 +779,53 @@ public class SearchEngine {
             Move b
     ) {
 
-        if (!a.getStart().equals(b.getStart())) {
+        if (
+                !a.getStart()
+                        .equals(b.getStart())
+        ) {
+
             return false;
         }
 
-        if (!a.getEnd().equals(b.getEnd())) {
+        if (
+                !a.getEnd()
+                        .equals(b.getEnd())
+        ) {
+
             return false;
         }
 
-        if (a.isPromotion() != b.isPromotion()) {
+        if (
+                a.isPromotion()
+                        != b.isPromotion()
+        ) {
+
             return false;
         }
 
         if (a.isPromotion()) {
 
-            return a.getPromotionPiece()
-                    .getClass()
-                    ==
-                    b.getPromotionPiece()
-                            .getClass();
+            return
+                    a.getPromotionPiece()
+                            .getClass()
+                            ==
+                            b.getPromotionPiece()
+                                    .getClass();
         }
 
         return true;
     }
 
     /**
-     * Stop the search when the time limit expires.
+     * Stop search when the clock expires.
      */
     private void checkTime() {
 
-        if (System.nanoTime() >= deadlineNanos) {
+        if (
+                System.nanoTime()
+                        >= deadlineNanos
+        ) {
+
             throw new SearchTimeoutException();
         }
     }
