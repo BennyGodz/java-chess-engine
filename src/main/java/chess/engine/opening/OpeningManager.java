@@ -8,83 +8,73 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Opening book manager.
+ * Opening book manager supporting both White and Black.
  *
- * The opening is only a suggested line.
+ * Uses the opening book while the current position is in theory.
+ * If the position leaves the opening book, the book is disabled and
+ * the normal search engine should take over.
  *
- * The engine is allowed to reject the book move if
- * the opponent has played something that makes the
- * book move strategically or tactically bad.
+ * The manager does not commit to one opening line. Instead, it finds
+ * all book moves that are valid for the current position and randomly
+ * chooses between them.
  */
 public class OpeningManager {
 
     private final OpeningBook openingBook;
     private final Random random;
+    private final List<String> playedMoves;
 
-    private List<String> selectedOpening;
-    private int moveIndex;
-
-    /*
-     * Once the opponent deviates badly from the opening,
-     * the opening book is permanently disabled for this game.
-     */
     private boolean openingActive;
 
     public OpeningManager() {
         this.openingBook = new OpeningBook();
         this.random = new Random();
-
-        selectRandomOpening();
+        this.playedMoves = new ArrayList<>();
+        this.openingActive = true;
     }
 
     /**
-     * Select a random opening.
+     * Record a move played on the board.
+     *
+     * This should be called for EVERY move played by either side.
+     *
+     * @param moveSan SAN representation of the move
      */
-    private void selectRandomOpening() {
-
-        List<List<String>> openings =
-                openingBook.getOpenings();
-
-        if (openings == null || openings.isEmpty()) {
-
-            selectedOpening = new ArrayList<>();
-            moveIndex = 0;
-            openingActive = false;
-
+    public void recordMove(String moveSan) {
+        if (!openingActive) {
             return;
         }
 
-        selectedOpening =
-                openings.get(
-                        random.nextInt(openings.size())
-                );
+        String cleanSan = removeCheckSuffix(moveSan);
+        playedMoves.add(cleanSan);
 
-        moveIndex = 0;
-        openingActive = true;
+        /*
+         * Check whether the current position is still represented
+         * somewhere in the opening book.
+         */
+        if (getMatchingOpenings().isEmpty()) {
+            System.out.println(
+                    "Opening book: Position is off theory. "
+                            + "Switching to normal engine search."
+            );
 
-        System.out.println();
-        System.out.println("================================");
-        System.out.println("OPENING BOOK");
-        System.out.println("================================");
-
-        System.out.println(
-                "Selected opening: "
-                        + String.join(
-                        " ",
-                        selectedOpening
-                )
-        );
-
-        System.out.println();
+            openingActive = false;
+        }
     }
 
     /**
-     * Get the opening move expected in the current position.
+     * Gets a legal opening move for the current position.
      *
-     * Returns null if:
+     * The manager searches through every opening that matches the
+     * moves played so far and collects all legal book moves.
      *
-     * 1. The opening has ended.
-     * 2. The current position does not match the book.
+     * If there are several book moves, one is chosen randomly.
+     *
+     * If there are no book moves, the opening book is disabled and
+     * null is returned so the normal search engine can choose a move.
+     *
+     * @param board current board
+     * @return a legal opening move, or null if the engine should search
      */
     public Move getOpeningMove(Board board) {
 
@@ -92,146 +82,232 @@ public class OpeningManager {
             return null;
         }
 
-        if (selectedOpening == null ||
-                moveIndex >= selectedOpening.size()) {
+        List<List<String>> matchingOpenings = getMatchingOpenings();
+
+        if (matchingOpenings.isEmpty()) {
+            System.out.println(
+                    "Opening book: No matching theory. "
+                            + "Switching to normal engine search."
+            );
 
             openingActive = false;
             return null;
         }
 
-        String expectedSan =
-                selectedOpening.get(moveIndex);
+        List<Move> legalMoves = board.getLegalMoves(board.isWhiteToMove());
 
-        List<Move> legalMoves =
-                board.getLegalMoves(
-                        board.isWhiteToMove()
-                );
+        /*
+         * Find every unique legal move that appears as the next move
+         * in at least one matching opening.
+         */
+        List<Move> bookMoves = new ArrayList<>();
 
-        List<Move> matchingMoves =
-                new ArrayList<>();
+        for (List<String> opening : matchingOpenings) {
 
-        String cleanExpected =
-                removeCheckSuffix(expectedSan);
+            int nextMoveIndex = playedMoves.size();
 
-        for (Move move : legalMoves) {
+            if (nextMoveIndex >= opening.size()) {
+                continue;
+            }
 
-            String actualSan =
-                    board.formatMove(move);
+            String expectedSan =
+                    removeCheckSuffix(opening.get(nextMoveIndex));
 
-            String cleanActual =
-                    removeCheckSuffix(actualSan);
+            for (Move move : legalMoves) {
 
-            if (cleanActual.equals(cleanExpected)) {
-                matchingMoves.add(move);
+                String actualSan =
+                        removeCheckSuffix(board.formatMove(move));
+
+                if (actualSan.equals(expectedSan)) {
+
+                    if (!containsSameMove(bookMoves, move, board)) {
+                        bookMoves.add(move);
+                    }
+                }
             }
         }
 
         /*
-         * If the current position does not allow
-         * the expected opening move, the opponent
-         * has deviated from our book.
+         * No legal book moves means we have reached the end of theory
+         * or the book does not contain this position.
          */
-        if (matchingMoves.size() != 1) {
-
-            System.out.println();
+        if (bookMoves.isEmpty()) {
             System.out.println(
-                    "Opening deviation detected."
-            );
-
-            System.out.println(
-                    "Expected book move: "
-                            + expectedSan
-            );
-
-            System.out.println(
-                    "Opening book disabled."
+                    "Opening book: No book move available. "
+                            + "Switching to normal engine search."
             );
 
             openingActive = false;
-
             return null;
         }
 
-        return matchingMoves.get(0);
+        /*
+         * Randomly choose between the available book moves.
+         *
+         * This is what prevents the engine from following the exact
+         * same opening line every time.
+         */
+        Move selectedMove =
+                bookMoves.get(random.nextInt(bookMoves.size()));
+
+        System.out.println(
+                "Opening book: "
+                        + board.formatMove(selectedMove)
+                        + " ("
+                        + bookMoves.size()
+                        + " book moves available)"
+        );
+
+        return selectedMove;
     }
 
     /**
-     * Advance to the next book move.
+     * Checks whether a move is already in the list.
      */
-    public void advance() {
+    private boolean containsSameMove(
+            List<Move> moves,
+            Move target,
+            Board board
+    ) {
+        String targetSan =
+                removeCheckSuffix(board.formatMove(target));
 
-        if (!openingActive) {
-            return;
+        for (Move move : moves) {
+
+            String moveSan =
+                    removeCheckSuffix(board.formatMove(move));
+
+            if (moveSan.equals(targetSan)) {
+                return true;
+            }
         }
 
-        moveIndex++;
+        return false;
+    }
 
-        if (moveIndex >= selectedOpening.size()) {
+    /**
+     * Returns every opening line that matches the moves played so far.
+     */
+    private List<List<String>> getMatchingOpenings() {
 
+        List<List<String>> matching = new ArrayList<>();
+
+        List<List<String>> openings =
+                openingBook.getOpenings();
+
+        if (openings == null) {
+            return matching;
+        }
+
+        for (List<String> opening : openings) {
+
+            if (matchesPlayedMoves(opening)) {
+                matching.add(opening);
+            }
+        }
+
+        return matching;
+    }
+
+    /**
+     * Checks whether an opening contains all moves played so far.
+     */
+    private boolean matchesPlayedMoves(List<String> opening) {
+
+        if (opening == null) {
+            return false;
+        }
+
+        if (opening.size() < playedMoves.size()) {
+            return false;
+        }
+
+        for (int i = 0; i < playedMoves.size(); i++) {
+
+            String openingMove =
+                    removeCheckSuffix(opening.get(i));
+
+            String playedMove =
+                    removeCheckSuffix(playedMoves.get(i));
+
+            if (!openingMove.equals(playedMove)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Disables the opening book manually.
+     */
+    public void disable() {
+
+        if (openingActive) {
             openingActive = false;
 
             System.out.println(
-                    "Opening book finished."
+                    "Opening book disabled. "
+                            + "Normal engine search will be used."
             );
         }
     }
 
     /**
-     * Permanently disable the opening book.
-     */
-    public void disable() {
-
-        openingActive = false;
-
-        System.out.println(
-                "Opening book disabled. "
-                        + "Engine will play normally."
-        );
-    }
-
-    /**
-     * Is the opening still active?
+     * Returns whether the opening book is still active.
      */
     public boolean isOpeningActive() {
-        return openingActive
-                && selectedOpening != null
-                && moveIndex < selectedOpening.size();
+        return openingActive;
     }
 
     /**
-     * Alias for compatibility with older code.
+     * Backwards compatibility.
      */
     public boolean isActive() {
         return isOpeningActive();
     }
 
     /**
-     * Get the selected opening line.
+     * Backwards compatibility.
+     *
+     * The old implementation selected a specific opening line.
+     * This implementation no longer does that, so this returns a
+     * description of the current book position instead.
      */
     public String getOpeningName() {
 
-        if (selectedOpening == null ||
-                selectedOpening.isEmpty()) {
-
-            return "Unknown";
+        if (!openingActive) {
+            return "None / Off Theory";
         }
 
-        return String.join(
-                " ",
-                selectedOpening
-        );
+        if (playedMoves.isEmpty()) {
+            return "Opening Book";
+        }
+
+        return "Opening Book: "
+                + String.join(" ", playedMoves);
     }
 
     /**
-     * Get current opening move index.
+     * Returns the number of moves currently recorded.
      */
     public int getMoveIndex() {
-        return moveIndex;
+        return playedMoves.size();
     }
 
     /**
-     * Remove check/checkmate markers when
-     * comparing SAN moves.
+     * Kept for compatibility with existing code.
+     *
+     * The opening manager automatically advances based on
+     * playedMoves, so nothing needs to happen here.
+     */
+    public void advance() {
+        // Nothing needed
+    }
+
+    /**
+     * Removes check and mate suffixes so that book moves can be
+     * compared consistently.
      */
     private String removeCheckSuffix(String san) {
 

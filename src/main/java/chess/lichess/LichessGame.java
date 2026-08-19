@@ -43,14 +43,14 @@ public class LichessGame {
     /*
      * Main blitz search.
      */
-    private static final int SEARCH_DEPTH = 9;
-    private static final long SEARCH_TIME_MS = 1000;
+    private static final int SEARCH_DEPTH = 6;
+    private static final long SEARCH_TIME_MS = 3000;
 
     /*
      * Fast opening safety check.
      */
-    private static final int OPENING_CHECK_DEPTH = 4;
-    private static final long OPENING_CHECK_TIME_MS = 250;
+    private static final int OPENING_CHECK_DEPTH = 6;
+    private static final long OPENING_CHECK_TIME_MS = 500;
 
     /*
      * Maximum amount of evaluation the opening

@@ -3,7 +3,6 @@ package chess;
 import chess.board.Board;
 import chess.board.Move;
 import chess.board.Position;
-import chess.engine.ChessEngine;
 import chess.engine.opening.OpeningManager;
 import chess.engine.search.SearchEngine;
 import chess.pieces.*;
@@ -14,6 +13,9 @@ import java.util.Scanner;
 
 /**
  * Console chess UI with SAN input and SAN output.
+ *
+ * The engine is accessed directly through SearchEngine.
+ * No engine facade is used.
  *
  * The opening book is optional.
  *
@@ -155,8 +157,13 @@ public class Main {
         Board board =
                 new Board();
 
-        ChessEngine engine =
-                new ChessEngine();
+        /*
+         * Use SearchEngine directly.
+         *
+         * No engine facade is needed.
+         */
+        SearchEngine engine =
+                new SearchEngine();
 
         OpeningManager openingManager =
                 new OpeningManager();
@@ -194,8 +201,8 @@ public class Main {
 
                 makeEngineMove(
                         board,
-                        engine,
-                        openingManager
+                        openingManager,
+                        engine
                 );
 
                 continue;
@@ -332,24 +339,10 @@ public class Main {
                 board.playMove(move);
 
                 /*
-                 * If the human made a move that does not
-                 * match the selected opening, disable it.
-                 *
-                 * We determine this by asking the opening
-                 * manager what it expected.
+                 * The OpeningManager itself determines
+                 * whether the current position can continue
+                 * the opening.
                  */
-                if (openingManager.isOpeningActive()) {
-
-                    /*
-                     * The opening manager can only continue
-                     * if the position after the human move
-                     * has a valid next book move.
-                     *
-                     * We don't disable it here because it
-                     * may still be the correct position.
-                     */
-                }
-
                 System.out.println(
                         "Played " + san
                 );
@@ -391,8 +384,8 @@ public class Main {
      */
     private static void makeEngineMove(
             Board board,
-            ChessEngine engine,
-            OpeningManager openingManager
+            OpeningManager openingManager,
+            SearchEngine engine
     ) {
 
         System.out.println();
