@@ -56,7 +56,7 @@ public class Main {
 
         // Engine settings.
         final int ENGINE_DEPTH = 9;
-        final long ENGINE_TIME_MS = 6000;
+        final long ENGINE_TIME_MS = 1000;
 
         while (true) {
             board.printBoard(playerIsWhite);

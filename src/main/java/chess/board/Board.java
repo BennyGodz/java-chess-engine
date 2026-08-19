@@ -736,6 +736,154 @@ public class Board {
         return fen.toString();
     }
 
+    public void loadFEN(String fen) {
+
+        String[] parts = fen.trim().split("\\s+");
+
+        if (parts.length < 4) {
+            throw new IllegalArgumentException(
+                    "Invalid FEN: " + fen
+            );
+        }
+
+        /*
+         * Clear board.
+         */
+        for (int row = 0; row < 8; row++) {
+            for (int column = 0; column < 8; column++) {
+                board[row][column] = null;
+            }
+        }
+
+        /*
+         * Piece placement.
+         */
+        String[] ranks = parts[0].split("/");
+
+        if (ranks.length != 8) {
+            throw new IllegalArgumentException(
+                    "Invalid FEN board: " + parts[0]
+            );
+        }
+
+        for (int row = 0; row < 8; row++) {
+
+            int column = 0;
+
+            for (char symbol : ranks[row].toCharArray()) {
+
+                if (Character.isDigit(symbol)) {
+
+                    column +=
+                            Character.getNumericValue(symbol);
+
+                } else {
+
+                    boolean white =
+                            Character.isUpperCase(symbol);
+
+                    Piece piece;
+
+                    switch (Character.toLowerCase(symbol)) {
+
+                        case 'p' -> piece = new Pawn(white);
+                        case 'n' -> piece = new Knight(white);
+                        case 'b' -> piece = new Bishop(white);
+                        case 'r' -> piece = new Rook(white);
+                        case 'q' -> piece = new Queen(white);
+                        case 'k' -> piece = new King(white);
+
+                        default -> throw new IllegalArgumentException(
+                                "Invalid FEN piece: " + symbol
+                        );
+                    }
+
+                    board[row][column] = piece;
+                    column++;
+                }
+            }
+
+            if (column != 8) {
+                throw new IllegalArgumentException(
+                        "Invalid FEN rank: " + ranks[row]
+                );
+            }
+        }
+
+        /*
+         * Side to move.
+         */
+        whiteToMove =
+                parts[1].equals("w");
+
+        /*
+         * Castling rights.
+         */
+        whiteKingsideCastle =
+                parts[2].contains("K");
+
+        whiteQueensideCastle =
+                parts[2].contains("Q");
+
+        blackKingsideCastle =
+                parts[2].contains("k");
+
+        blackQueensideCastle =
+                parts[2].contains("q");
+
+        /*
+         * En passant.
+         */
+        if (parts[3].equals("-")) {
+
+            enPassantTarget = null;
+
+        } else {
+
+            String square = parts[3];
+
+            int column =
+                    square.charAt(0) - 'a';
+
+            int row =
+                    8 - Character.getNumericValue(
+                            square.charAt(1)
+                    );
+
+            enPassantTarget =
+                    new Position(row, column);
+        }
+
+        /*
+         * Halfmove clock.
+         */
+        if (parts.length >= 5) {
+            halfmoveClock =
+                    Integer.parseInt(parts[4]);
+        } else {
+            halfmoveClock = 0;
+        }
+
+        /*
+         * Fullmove number.
+         */
+        if (parts.length >= 6) {
+            fullmoveNumber =
+                    Integer.parseInt(parts[5]);
+        } else {
+            fullmoveNumber = 1;
+        }
+
+        /*
+         * Reset repetition tracking.
+         */
+        repetitionCounts.clear();
+        repetitionCounts.put(
+                getPositionKey(),
+                1
+        );
+    }
+
     public void printBoard(boolean playerIsWhite) {
         System.out.println();
         if (playerIsWhite) printWhiteOrientation();
