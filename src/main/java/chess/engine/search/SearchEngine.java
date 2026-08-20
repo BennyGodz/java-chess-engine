@@ -4,6 +4,7 @@ import chess.board.Board;
 import chess.board.Move;
 import chess.engine.evaluation.Evaluator;
 import chess.pieces.Piece;
+import chess.pieces.Queen;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,11 +19,20 @@ import java.util.List;
  * Quiescence search
  * Tactical move ordering
  * Check extensions
+ * Endgame extensions
+ * Promotion extensions
  *
  * The evaluator handles positional decisions.
  *
- * This class focuses primarily on calculating tactics,
- * forcing sequences, checks, captures, and mating attacks.
+ * This class focuses heavily on:
+ *
+ * checks
+ * captures
+ * queen captures
+ * mating attacks
+ * promotions
+ * tactical sequences
+ * endgames
  */
 public class SearchEngine {
 
@@ -31,21 +41,28 @@ public class SearchEngine {
     private static final int INFINITY = 1_000_000;
 
     /*
-     * Maximum number of check extensions allowed
-     * in one variation.
+     * Maximum number of consecutive checking extensions.
      */
-    private static final int MAX_CHECK_EXTENSIONS = 8;
+    private static final int MAX_CHECK_EXTENSIONS = 12;
 
     /*
-     * Maximum depth of quiescence search.
-     *
-     * This is necessary because checks and captures can
-     * create very long tactical sequences.
-     *
-     * Without a limit, quiescence can recurse forever
-     * and eventually cause StackOverflowError.
+     * Quiescence needs to be reasonably deep because
+     * checking sequences can continue for many moves.
      */
-    private static final int MAX_QUIESCENCE_DEPTH = 8;
+    private static final int MAX_QUIESCENCE_DEPTH = 16;
+
+    /*
+     * Extra search depth in simplified positions.
+     *
+     * Endgames are much more tactical because kings and
+     * pawns become important.
+     */
+    private static final int ENDGAME_EXTENSION = 1;
+
+    /*
+     * Promotion positions deserve additional calculation.
+     */
+    private static final int PROMOTION_EXTENSION = 2;
 
     private final Evaluator evaluator;
 
@@ -93,6 +110,28 @@ public class SearchEngine {
                         timeLimitMillis
                 ) * 1_000_000L;
 
+        /*
+         * Always check for an immediate mate first.
+         *
+         * This prevents a positional move from being selected
+         * when a mate in one exists.
+         */
+        Move mateMove =
+                findImmediateMate(
+                        board,
+                        legalMoves
+                );
+
+        if (mateMove != null) {
+
+            return new SearchResult(
+                    mateMove,
+                    MATE_SCORE,
+                    1,
+                    nodes
+            );
+        }
+
         Move bestMove =
                 legalMoves.get(0);
 
@@ -103,10 +142,6 @@ public class SearchEngine {
 
         /*
          * Iterative deepening.
-         *
-         * If time expires during a deeper search,
-         * the result from the previous completed depth
-         * is kept.
          */
         for (
                 int depth = 1;
@@ -149,6 +184,43 @@ public class SearchEngine {
     }
 
     /**
+     * Find a checkmate in one.
+     */
+    private Move findImmediateMate(
+            Board board,
+            List<Move> moves
+    ) {
+
+        for (Move move : moves) {
+
+            checkTime();
+
+            Board child =
+                    board.copyAndPlayMoveForSearch(
+                            move
+                    );
+
+            boolean enemyToMove =
+                    child.isWhiteToMove();
+
+            if (
+                    child.isInCheck(
+                            enemyToMove
+                    )
+                            &&
+                            child.getLegalMoves(
+                                    enemyToMove
+                            ).isEmpty()
+            ) {
+
+                return move;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Root search.
      */
     private RootResult searchRoot(
@@ -165,6 +237,18 @@ public class SearchEngine {
                 );
 
         if (moves.isEmpty()) {
+
+            if (
+                    board.isInCheck(
+                            board.isWhiteToMove()
+                    )
+            ) {
+
+                return new RootResult(
+                        null,
+                        -MATE_SCORE
+                );
+            }
 
             return new RootResult(
                     null,
@@ -199,23 +283,46 @@ public class SearchEngine {
                             move
                     );
 
-            /*
-             * Give checking moves an extension.
-             */
             boolean givesCheck =
                     child.isInCheck(
                             child.isWhiteToMove()
                     );
 
-            int extension =
-                    givesCheck
-                            ? 1
-                            : 0;
+            int extension = 0;
+
+            /*
+             * Checks deserve an extra ply.
+             */
+            if (givesCheck) {
+
+                extension += 1;
+            }
+
+            /*
+             * Promotions deserve extra calculation.
+             */
+            if (move.isPromotion()) {
+
+                extension +=
+                        PROMOTION_EXTENSION;
+            }
+
+            /*
+             * Simplified endgames deserve extra calculation.
+             */
+            if (isEndgame(child)) {
+
+                extension +=
+                        ENDGAME_EXTENSION;
+            }
 
             int score =
                     -negamax(
                             child,
-                            depth - 1 + extension,
+                            Math.max(
+                                    0,
+                                    depth - 1 + extension
+                            ),
                             -beta,
                             -alpha,
                             1,
@@ -248,11 +355,6 @@ public class SearchEngine {
 
     /**
      * Negamax alpha beta search.
-     *
-     * Scores are always returned from the perspective
-     * of the side whose turn it is.
-     *
-     * Checking moves receive search extensions.
      */
     private int negamax(
             Board board,
@@ -281,7 +383,7 @@ public class SearchEngine {
             if (board.isInCheck(side)) {
 
                 /*
-                 * Mate sooner is better for the attacker.
+                 * Lower ply means faster mate.
                  */
                 return -MATE_SCORE + ply;
             }
@@ -317,9 +419,6 @@ public class SearchEngine {
             );
         }
 
-        /*
-         * Tactical move ordering.
-         */
         orderMoves(
                 board,
                 moves,
@@ -338,33 +437,57 @@ public class SearchEngine {
                             move
                     );
 
-            /*
-             * Determine whether the move gives check.
-             */
             boolean givesCheck =
                     child.isInCheck(
                             child.isWhiteToMove()
                     );
 
+            int extension = 0;
+
             /*
              * Check extension.
              */
-            int extension = 0;
-
-            int newCheckExtensions =
-                    checkExtensions;
-
             if (
                     givesCheck
-                            && checkExtensions
-                            < MAX_CHECK_EXTENSIONS
+                            &&
+                            checkExtensions
+                                    < MAX_CHECK_EXTENSIONS
             ) {
 
                 extension = 1;
-
-                newCheckExtensions =
-                        checkExtensions + 1;
             }
+
+            /*
+             * Promotions are extremely tactical.
+             */
+            if (move.isPromotion()) {
+
+                extension +=
+                        PROMOTION_EXTENSION;
+            }
+
+            /*
+             * Endgames need more calculation because
+             * king moves and pawn races are critical.
+             */
+            if (isEndgame(child)) {
+
+                extension +=
+                        ENDGAME_EXTENSION;
+            }
+
+            /*
+             * IMPORTANT:
+             *
+             * If this move does not give check, reset the
+             * checking sequence.
+             *
+             * Your previous version did not do this.
+             */
+            int newCheckExtensions =
+                    givesCheck
+                            ? checkExtensions + 1
+                            : 0;
 
             int score =
                     -negamax(
@@ -401,14 +524,7 @@ public class SearchEngine {
     }
 
     /**
-     * Quiescence search.
-     *
-     * Continues searching tactical positions instead
-     * of stopping immediately after a capture.
-     *
-     * The search is limited by MAX_QUIESCENCE_DEPTH
-     * so that endless tactical sequences cannot cause
-     * a StackOverflowError.
+     * Tactical quiescence search.
      */
     private int quiescence(
             Board board,
@@ -429,10 +545,7 @@ public class SearchEngine {
                 board.getLegalMoves(side);
 
         /*
-         * Checkmate or stalemate.
-         *
-         * This must happen before the depth cutoff so
-         * that checkmate is still recognized correctly.
+         * Mate or stalemate must always be checked first.
          */
         if (legalMoves.isEmpty()) {
 
@@ -445,30 +558,24 @@ public class SearchEngine {
         }
 
         /*
-         * If the quiescence depth limit has been reached,
-         * stop searching and use the static evaluation.
-         *
-         * This prevents infinite recursion from long
-         * sequences of checks or captures.
-         */
-        if (
-                quiescenceDepth
-                        >= MAX_QUIESCENCE_DEPTH
-        ) {
-
-            return side
-                    ? evaluator.evaluate(board)
-                    : -evaluator.evaluate(board);
-        }
-
-        /*
-         * If in check, every legal evasion must be searched.
-         *
-         * We cannot use stand-pat here because being in
-         * check means the current position cannot simply
-         * be evaluated without making a move.
+         * If the side to move is in check, ALL evasions
+         * must be searched.
          */
         if (board.isInCheck(side)) {
+
+            if (
+                    quiescenceDepth
+                            >= MAX_QUIESCENCE_DEPTH
+            ) {
+
+                /*
+                 * Never blindly evaluate a checked position.
+                 * Search at least the legal evasions.
+                 */
+                return side
+                        ? evaluator.evaluate(board)
+                        : -evaluator.evaluate(board);
+            }
 
             orderMoves(
                     board,
@@ -476,8 +583,7 @@ public class SearchEngine {
                     null
             );
 
-            for (Move move :
-                    legalMoves) {
+            for (Move move : legalMoves) {
 
                 checkTime();
 
@@ -530,13 +636,23 @@ public class SearchEngine {
         }
 
         /*
-         * Search tactical moves.
+         * Stop eventually.
+         */
+        if (
+                quiescenceDepth
+                        >= MAX_QUIESCENCE_DEPTH
+        ) {
+
+            return alpha;
+        }
+
+        /*
+         * Collect forcing moves.
          */
         List<Move> tactical =
                 new ArrayList<>();
 
-        for (Move move :
-                legalMoves) {
+        for (Move move : legalMoves) {
 
             if (
                     isTactical(
@@ -549,10 +665,6 @@ public class SearchEngine {
             }
         }
 
-        /*
-         * If there are no tactical moves, the position
-         * is quiet enough to stop.
-         */
         if (tactical.isEmpty()) {
 
             return alpha;
@@ -564,8 +676,7 @@ public class SearchEngine {
                 null
         );
 
-        for (Move move :
-                tactical) {
+        for (Move move : tactical) {
 
             checkTime();
 
@@ -599,6 +710,100 @@ public class SearchEngine {
     }
 
     /**
+     * Determine whether a position should be treated
+     * as an endgame.
+     *
+     * This is deliberately more aggressive than the old
+     * evaluator test.
+     */
+    private boolean isEndgame(Board board) {
+
+        int queens = 0;
+        int rooks = 0;
+        int minors = 0;
+        int pawns = 0;
+
+        for (int r = 0; r < 8; r++) {
+
+            for (int c = 0; c < 8; c++) {
+
+                Piece piece =
+                        board.getPiece(
+                                new chess.board.Position(r, c)
+                        );
+
+                if (piece == null) {
+                    continue;
+                }
+
+                if (piece instanceof Queen) {
+                    queens++;
+                }
+
+                else if (
+                        piece instanceof chess.pieces.Rook
+                ) {
+                    rooks++;
+                }
+
+                else if (
+                        piece instanceof chess.pieces.Bishop
+                                ||
+                                piece instanceof chess.pieces.Knight
+                ) {
+                    minors++;
+                }
+
+                else if (
+                        piece instanceof chess.pieces.Pawn
+                ) {
+                    pawns++;
+                }
+            }
+        }
+
+        /*
+         * No queens and at most one rook total.
+         */
+        if (
+                queens == 0
+                        &&
+                        rooks <= 1
+        ) {
+
+            return true;
+        }
+
+        /*
+         * Queenless positions with limited material.
+         */
+        if (
+                queens == 0
+                        &&
+                        rooks <= 2
+                        &&
+                        minors <= 3
+        ) {
+
+            return true;
+        }
+
+        /*
+         * Very low total material.
+         */
+        if (
+                rooks + minors <= 2
+                        &&
+                        pawns <= 8
+        ) {
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Determine whether a move is tactical.
      *
      * Tactical moves include:
@@ -623,21 +828,16 @@ public class SearchEngine {
             return true;
         }
 
-        /*
-         * Normal capture.
-         */
-        if (
+        Piece captured =
                 board.getPiece(
                         move.getEnd()
-                ) != null
-        ) {
+                );
+
+        if (captured != null) {
 
             return true;
         }
 
-        /*
-         * Check detection.
-         */
         Board child =
                 board.copyAndPlayMoveForSearch(
                         move
@@ -650,6 +850,10 @@ public class SearchEngine {
 
     /**
      * Move ordering.
+     *
+     * This is extremely important for alpha beta.
+     *
+     * Good tactical moves are searched first.
      */
     private void orderMoves(
             Board board,
@@ -670,10 +874,13 @@ public class SearchEngine {
     }
 
     /**
-     * Score a move for ordering.
+     * Calculate move ordering score.
      *
-     * This does not determine whether a move is good.
-     * It determines which moves are searched first.
+     * IMPORTANT:
+     *
+     * This does NOT decide which move is best.
+     *
+     * It only decides which move gets searched first.
      */
     private int moveOrderingScore(
             Board board,
@@ -688,13 +895,14 @@ public class SearchEngine {
          */
         if (
                 principalVariationMove != null
-                        && sameMove(
-                        move,
-                        principalVariationMove
-                )
+                        &&
+                        sameMove(
+                                move,
+                                principalVariationMove
+                        )
         ) {
 
-            score += 1_000_000;
+            score += 2_000_000;
         }
 
         /*
@@ -702,11 +910,17 @@ public class SearchEngine {
          */
         if (move.isPromotion()) {
 
-            score +=
-                    80_000
-                            + move
-                            .getPromotionPiece()
-                            .getValue();
+            score += 300_000;
+
+            if (
+                    move.getPromotionPiece()
+                            != null
+            ) {
+
+                score +=
+                        move.getPromotionPiece()
+                                .getValue();
+            }
         }
 
         /*
@@ -729,10 +943,26 @@ public class SearchEngine {
                             ? 0
                             : attacker.getValue();
 
-            score +=
-                    50_000
-                            + captured.getValue() * 10
-                            - attackerValue;
+            int capturedValue =
+                    captured.getValue();
+
+            /*
+             * Capturing a queen should be extremely high
+             * priority.
+             */
+            if (captured instanceof Queen) {
+
+                score += 500_000;
+
+            } else {
+
+                score +=
+                        100_000
+                                +
+                                capturedValue * 100
+                                -
+                                attackerValue;
+            }
         }
 
         /*
@@ -740,7 +970,7 @@ public class SearchEngine {
          */
         if (move.isEnPassant()) {
 
-            score += 50_000;
+            score += 100_000;
         }
 
         /*
@@ -748,24 +978,48 @@ public class SearchEngine {
          */
         if (move.isCastling()) {
 
-            score += 2_000;
+            score += 3_000;
         }
 
         /*
-         * Checks should be searched very early.
+         * Check detection.
          */
         Board child =
                 board.copyAndPlayMoveForSearch(
                         move
                 );
 
-        if (
+        boolean givesCheck =
                 child.isInCheck(
                         child.isWhiteToMove()
-                )
+                );
+
+        if (givesCheck) {
+
+            /*
+             * Checks are extremely forcing.
+             */
+            score += 250_000;
+
+            /*
+             * A checking capture is even stronger.
+             */
+            if (captured != null) {
+
+                score += 150_000;
+            }
+        }
+
+        /*
+         * Promotion that also checks.
+         */
+        if (
+                move.isPromotion()
+                        &&
+                        givesCheck
         ) {
 
-            score += 40_000;
+            score += 200_000;
         }
 
         return score;
