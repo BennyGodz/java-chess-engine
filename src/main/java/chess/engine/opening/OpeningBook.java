@@ -7,15 +7,15 @@ import java.util.List;
 /**
  * Large chess opening book.
  *
- * <p>The book contains:
+ * The book contains:
  *
- * <p>Strong mainline openings Common theoretical variations Sidelines Gambits Tactical opening
+ * Strong mainline openings Common theoretical variations Sidelines Gambits Tactical opening
  * traps Refutations of dubious openings
  *
- * <p>The engine does NOT randomly invent opening moves. Every move comes from a known theoretical
+ * The engine does NOT randomly invent opening moves. Every move comes from a known theoretical
  * line.
  *
- * <p>Moves are stored in SAN notation.
+ * Moves are stored in SAN notation.
  */
 public class OpeningBook {
 

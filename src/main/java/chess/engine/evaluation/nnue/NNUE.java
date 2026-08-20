@@ -4,13 +4,8 @@ import chess.board.Board;
 import java.io.File;
 import java.io.IOException;
 
-/**
- * Feed-forward NNUE evaluator. Scores positions from White's perspective in centipawns. Mate and
- * draw outcomes are handled by {@link chess.engine.evaluation.Evaluator}, not here.
- */
 public class NNUE {
 
-  /** Maps tanh output to centipawn range (~±400). */
   private static final int OUTPUT_SCALE = 400;
 
   private final NNUEWeights weights;
@@ -18,44 +13,45 @@ public class NNUE {
 
   public NNUE(NNUEWeights weights) {
     this.weights = weights;
-    this.extractor = new NNUEFeatureExtractor();
+    extractor = new NNUEFeatureExtractor();
   }
 
-  /** Returns centipawns from White's perspective. */
   public int evaluate(Board board) {
     double[] features = extractor.extract(board);
     double[] hidden = new double[NNUEWeights.HIDDEN_SIZE];
 
-    // Input → hidden (sparse: skip zero features)
     for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++) {
       double sum = weights.hiddenBias[h];
+
       for (int i = 0; i < NNUEWeights.INPUT_SIZE; i++) {
-        if (features[i] == 0.0) continue;
-        sum += features[i] * weights.inputWeights[i][h];
+        if (features[i] != 0.0)
+          sum += features[i] * weights.inputWeights[i][h];
       }
+
       hidden[h] = relu(sum);
     }
 
-    // Hidden → second hidden
     double[] hidden2 = new double[NNUEWeights.SECOND_HIDDEN_SIZE];
+
     for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++) {
       double sum = weights.secondHiddenBias[h2];
-      for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++) {
+
+      for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++)
         sum += hidden[h] * weights.hiddenWeights[h][h2];
-      }
+
       hidden2[h2] = relu(sum);
     }
 
-    // Second hidden → output, then tanh to bound score
-    double rawOutput = weights.outputBias;
-    for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++) {
-      rawOutput += hidden2[h2] * weights.outputWeights[h2];
-    }
-    return (int) Math.round(Math.tanh(rawOutput) * OUTPUT_SCALE);
+    double output = weights.outputBias;
+
+    for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++)
+      output += hidden2[h2] * weights.outputWeights[h2];
+
+    return (int) Math.round(Math.tanh(output) * OUTPUT_SCALE);
   }
 
-  private static double relu(double value) {
-    return Math.max(0.0, value);
+  private static double relu(double x) {
+    return Math.max(0.0, x);
   }
 
   public NNUEWeights getWeights() {
