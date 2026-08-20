@@ -1,1088 +1,584 @@
 package chess.engine.evaluation.nnue;
 
 import chess.board.Board;
-
 import java.io.*;
 import java.util.*;
 
 /**
  * Trains the NNUE network using Stockfish evaluations.
  *
- * Training data format:
+ * <p>Training data format:
  *
- * FEN|evaluation
+ * <p>FEN|evaluation
  *
- * Evaluation is expected to be in pawns
- * and from White's perspective.
+ * <p>Evaluation is expected to be in pawns and from White's perspective.
  *
- * Example:
+ * <p>Example:
  *
- * FEN|0.35
+ * <p>FEN|0.35
  *
- * Architecture:
+ * <p>Architecture:
  *
- * 769 -> 64 -> 32 -> 1
+ * <p>769 -> 64 -> 32 -> 1
  */
 public class NNUETrainer {
 
-    private static final String TRAINING_FILE =
-            "training_data.txt";
+  private static final String TRAINING_FILE = "training_data.txt";
 
-    private static final String OUTPUT_FILE =
-            "nnue_weights.bin";
+  private static final String OUTPUT_FILE = "nnue_weights.bin";
 
-    private static final String BEST_OUTPUT_FILE =
-            "nnue_weights_best.bin";
+  private static final String BEST_OUTPUT_FILE = "nnue_weights_best.bin";
 
-    private static final int EPOCHS =
-            15;
+  private static final int EPOCHS = 15;
 
-    private static final int BATCH_SIZE =
-            128;
+  private static final int BATCH_SIZE = 128;
 
-    private static final double LEARNING_RATE =
-            0.0003;
+  private static final double LEARNING_RATE = 0.0003;
 
-    /*
-     * Stockfish pawn evaluations are converted into
-     * a target between -1 and +1.
-     *
-     * 1 pawn:
-     *
-     * tanh(100 / 400)
-     */
-    private static final double TARGET_SCALE =
-            400.0;
+  /*
+   * Stockfish pawn evaluations are converted into
+   * a target between -1 and +1.
+   *
+   * 1 pawn:
+   *
+   * tanh(100 / 400)
+   */
+  private static final double TARGET_SCALE = 400.0;
 
-    /*
-     * Prevents extreme Stockfish values from
-     * dominating training.
-     */
-    private static final double EVALUATION_CLAMP =
-            10.0;
+  /*
+   * Prevents extreme Stockfish values from
+   * dominating training.
+   */
+  private static final double EVALUATION_CLAMP = 10.0;
 
-    /*
-     * Gradient clipping.
-     */
-    private static final double GRADIENT_CLIP =
-            5.0;
+  /*
+   * Gradient clipping.
+   */
+  private static final double GRADIENT_CLIP = 5.0;
 
-    /*
-     * 90% training.
-     * 10% validation.
-     */
-    private static final double VALIDATION_RATIO =
-            0.10;
+  /*
+   * 90% training.
+   * 10% validation.
+   */
+  private static final double VALIDATION_RATIO = 0.10;
 
-    public static void main(String[] args) {
+  public static void main(String[] args) {
 
-        System.out.println(
-                "Loading training data..."
-        );
+    System.out.println("Loading training data...");
+
+    try {
+
+      List<TrainingExample> examples = loadData(TRAINING_FILE);
+
+      System.out.println("Loaded " + examples.size() + " positions.");
+
+      if (examples.isEmpty()) {
+
+        throw new IllegalStateException("No training data found.");
+      }
+
+      Collections.shuffle(examples, new Random(12345));
+
+      int validationSize = Math.max(1, (int) (examples.size() * VALIDATION_RATIO));
+
+      int trainingSize = examples.size() - validationSize;
+
+      List<TrainingExample> trainingData = new ArrayList<>(examples.subList(0, trainingSize));
+
+      List<TrainingExample> validationData =
+          new ArrayList<>(examples.subList(trainingSize, examples.size()));
+
+      System.out.println("Training positions: " + trainingData.size());
+
+      System.out.println("Validation positions: " + validationData.size());
+
+      NNUEWeights weights = NNUEWeights.random();
+
+      train(weights, trainingData, validationData);
+
+      /*
+       * Save final weights.
+       */
+      weights.save(new File(OUTPUT_FILE));
+
+      System.out.println();
+      System.out.println("Training complete.");
+
+      System.out.println("Saved: " + OUTPUT_FILE);
+
+    } catch (Exception e) {
+
+      e.printStackTrace();
+    }
+  }
+
+  private static List<TrainingExample> loadData(String file) throws IOException {
+
+    List<TrainingExample> data = new ArrayList<>();
+
+    try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+
+      String line;
+
+      while ((line = reader.readLine()) != null) {
+
+        line = line.trim();
+
+        if (line.isEmpty()) {
+          continue;
+        }
+
+        int separator = line.lastIndexOf('|');
+
+        if (separator <= 0) {
+          continue;
+        }
+
+        String fen = line.substring(0, separator);
+
+        String evaluationText = line.substring(separator + 1);
 
         try {
 
-            List<TrainingExample> examples =
-                    loadData(TRAINING_FILE);
+          double evaluation = Double.parseDouble(evaluationText);
 
-            System.out.println(
-                    "Loaded "
-                            + examples.size()
-                            + " positions."
-            );
+          if (Double.isNaN(evaluation) || Double.isInfinite(evaluation)) {
+            continue;
+          }
 
-            if (examples.isEmpty()) {
+          /*
+           * Remove extreme values.
+           *
+           * Mate should be handled by search.
+           */
+          evaluation = Math.max(-EVALUATION_CLAMP, Math.min(EVALUATION_CLAMP, evaluation));
 
-                throw new IllegalStateException(
-                        "No training data found."
-                );
-            }
+          Board board = new Board();
 
-            Collections.shuffle(
-                    examples,
-                    new Random(12345)
-            );
+          board.loadFEN(fen);
 
-            int validationSize =
-                    Math.max(
-                            1,
-                            (int) (
-                                    examples.size()
-                                            *
-                                            VALIDATION_RATIO
-                            )
-                    );
+          data.add(new TrainingExample(board, evaluation));
 
-            int trainingSize =
-                    examples.size()
-                            -
-                            validationSize;
+        } catch (Exception ignored) {
 
-            List<TrainingExample> trainingData =
-                    new ArrayList<>(
-                            examples.subList(
-                                    0,
-                                    trainingSize
-                            )
-                    );
-
-            List<TrainingExample> validationData =
-                    new ArrayList<>(
-                            examples.subList(
-                                    trainingSize,
-                                    examples.size()
-                            )
-                    );
-
-            System.out.println(
-                    "Training positions: "
-                            + trainingData.size()
-            );
-
-            System.out.println(
-                    "Validation positions: "
-                            + validationData.size()
-            );
-
-            NNUEWeights weights =
-                    NNUEWeights.random();
-
-            train(
-                    weights,
-                    trainingData,
-                    validationData
-            );
-
-            /*
-             * Save final weights.
-             */
-            weights.save(
-                    new File(OUTPUT_FILE)
-            );
-
-            System.out.println();
-            System.out.println(
-                    "Training complete."
-            );
-
-            System.out.println(
-                    "Saved: "
-                            + OUTPUT_FILE
-            );
-
-        } catch (Exception e) {
-
-            e.printStackTrace();
+          /*
+           * Skip malformed positions.
+           */
         }
+      }
     }
 
-    private static List<TrainingExample> loadData(
-            String file
-    ) throws IOException {
+    return data;
+  }
 
-        List<TrainingExample> data =
-                new ArrayList<>();
+  private static void train(
+      NNUEWeights weights,
+      List<TrainingExample> trainingData,
+      List<TrainingExample> validationData) {
 
-        try (
-                BufferedReader reader =
-                        new BufferedReader(
-                                new FileReader(file)
-                        )
-        ) {
+    NNUEFeatureExtractor extractor = new NNUEFeatureExtractor();
 
-            String line;
+    Random random = new Random(12345);
 
-            while (
-                    (line = reader.readLine())
-                            != null
-            ) {
+    double bestValidationLoss = Double.POSITIVE_INFINITY;
 
-                line = line.trim();
+    for (int epoch = 1; epoch <= EPOCHS; epoch++) {
 
-                if (line.isEmpty()) {
-                    continue;
-                }
+      Collections.shuffle(trainingData, random);
 
-                int separator =
-                        line.lastIndexOf('|');
+      double totalLoss = 0.0;
 
-                if (separator <= 0) {
-                    continue;
-                }
+      int processed = 0;
 
-                String fen =
-                        line.substring(
-                                0,
-                                separator
-                        );
+      for (int start = 0; start < trainingData.size(); start += BATCH_SIZE) {
 
-                String evaluationText =
-                        line.substring(
-                                separator + 1
-                        );
+        int end = Math.min(start + BATCH_SIZE, trainingData.size());
 
-                try {
+        Gradients gradients = new Gradients();
 
-                    double evaluation =
-                            Double.parseDouble(
-                                    evaluationText
-                            );
+        double batchLoss = 0.0;
 
-                    if (
-                            Double.isNaN(evaluation)
-                                    ||
-                                    Double.isInfinite(evaluation)
-                    ) {
-                        continue;
-                    }
+        for (int index = start; index < end; index++) {
 
-                    /*
-                     * Remove extreme values.
-                     *
-                     * Mate should be handled by search.
-                     */
-                    evaluation =
-                            Math.max(
-                                    -EVALUATION_CLAMP,
-                                    Math.min(
-                                            EVALUATION_CLAMP,
-                                            evaluation
-                                    )
-                            );
+          TrainingExample example = trainingData.get(index);
 
-                    Board board =
-                            new Board();
+          double[] features = extractor.extract(example.board);
 
-                    board.loadFEN(fen);
+          ForwardResult forward = forward(weights, features);
 
-                    data.add(
-                            new TrainingExample(
-                                    board,
-                                    evaluation
-                            )
-                    );
+          double target = normalizeTarget(example.evaluation);
 
-                } catch (Exception ignored) {
+          double error = forward.output - target;
 
-                    /*
-                     * Skip malformed positions.
-                     */
-                }
-            }
+          batchLoss += error * error;
+
+          backward(weights, gradients, features, forward, target);
         }
 
-        return data;
+        int batchSize = end - start;
+
+        gradients.scale(1.0 / batchSize);
+
+        gradients.clip(GRADIENT_CLIP);
+
+        gradients.apply(weights, LEARNING_RATE);
+
+        totalLoss += batchLoss;
+
+        processed += batchSize;
+      }
+
+      double trainingLoss = totalLoss / trainingData.size();
+
+      double validationLoss = calculateLoss(weights, validationData, extractor);
+
+      System.out.printf(
+          "Epoch %d/%d | train %.6f | validation %.6f | positions %d%n",
+          epoch, EPOCHS, trainingLoss, validationLoss, processed);
+
+      /*
+       * Save the best validation network.
+       */
+      if (validationLoss < bestValidationLoss) {
+
+        bestValidationLoss = validationLoss;
+
+        try {
+
+          weights.save(new File(BEST_OUTPUT_FILE));
+
+          System.out.println("  New best network saved.");
+
+        } catch (IOException e) {
+
+          throw new RuntimeException("Could not save best weights.", e);
+        }
+      }
+    }
+  }
+
+  private static double calculateLoss(
+      NNUEWeights weights, List<TrainingExample> data, NNUEFeatureExtractor extractor) {
+
+    double totalLoss = 0.0;
+
+    for (TrainingExample example : data) {
+
+      double[] features = extractor.extract(example.board);
+
+      ForwardResult forward = forward(weights, features);
+
+      double target = normalizeTarget(example.evaluation);
+
+      double error = forward.output - target;
+
+      totalLoss += error * error;
     }
 
-    private static void train(
-            NNUEWeights weights,
-            List<TrainingExample> trainingData,
-            List<TrainingExample> validationData
-    ) {
+    return totalLoss / data.size();
+  }
 
-        NNUEFeatureExtractor extractor =
-                new NNUEFeatureExtractor();
+  private static double normalizeTarget(double evaluation) {
 
-        Random random =
-                new Random(12345);
+    return Math.tanh(evaluation * 100.0 / TARGET_SCALE);
+  }
 
-        double bestValidationLoss =
-                Double.POSITIVE_INFINITY;
+  private static ForwardResult forward(NNUEWeights weights, double[] features) {
 
-        for (
-                int epoch = 1;
-                epoch <= EPOCHS;
-                epoch++
-        ) {
+    double[] hidden = new double[NNUEWeights.HIDDEN_SIZE];
 
-            Collections.shuffle(
-                    trainingData,
-                    random
-            );
+    /*
+     * Input -> first hidden.
+     *
+     * Skip all zero features.
+     */
+    for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++) {
 
-            double totalLoss = 0.0;
+      double sum = weights.hiddenBias[h];
 
-            int processed = 0;
+      for (int i = 0; i < NNUEWeights.INPUT_SIZE; i++) {
 
-            for (
-                    int start = 0;
-                    start < trainingData.size();
-                    start += BATCH_SIZE
-            ) {
-
-                int end =
-                        Math.min(
-                                start + BATCH_SIZE,
-                                trainingData.size()
-                        );
-
-                Gradients gradients =
-                        new Gradients();
-
-                double batchLoss = 0.0;
-
-                for (
-                        int index = start;
-                        index < end;
-                        index++
-                ) {
-
-                    TrainingExample example =
-                            trainingData.get(index);
-
-                    double[] features =
-                            extractor.extract(
-                                    example.board
-                            );
-
-                    ForwardResult forward =
-                            forward(
-                                    weights,
-                                    features
-                            );
-
-                    double target =
-                            normalizeTarget(
-                                    example.evaluation
-                            );
-
-                    double error =
-                            forward.output
-                                    -
-                                    target;
-
-                    batchLoss +=
-                            error * error;
-
-                    backward(
-                            weights,
-                            gradients,
-                            features,
-                            forward,
-                            target
-                    );
-                }
-
-                int batchSize =
-                        end - start;
-
-                gradients.scale(
-                        1.0 / batchSize
-                );
-
-                gradients.clip(
-                        GRADIENT_CLIP
-                );
-
-                gradients.apply(
-                        weights,
-                        LEARNING_RATE
-                );
-
-                totalLoss +=
-                        batchLoss;
-
-                processed +=
-                        batchSize;
-            }
-
-            double trainingLoss =
-                    totalLoss
-                            /
-                            trainingData.size();
-
-            double validationLoss =
-                    calculateLoss(
-                            weights,
-                            validationData,
-                            extractor
-                    );
-
-            System.out.printf(
-                    "Epoch %d/%d | train %.6f | validation %.6f | positions %d%n",
-                    epoch,
-                    EPOCHS,
-                    trainingLoss,
-                    validationLoss,
-                    processed
-            );
-
-            /*
-             * Save the best validation network.
-             */
-            if (
-                    validationLoss
-                            <
-                            bestValidationLoss
-            ) {
-
-                bestValidationLoss =
-                        validationLoss;
-
-                try {
-
-                    weights.save(
-                            new File(
-                                    BEST_OUTPUT_FILE
-                            )
-                    );
-
-                    System.out.println(
-                            "  New best network saved."
-                    );
-
-                } catch (IOException e) {
-
-                    throw new RuntimeException(
-                            "Could not save best weights.",
-                            e
-                    );
-                }
-            }
+        if (features[i] == 0.0) {
+          continue;
         }
+
+        sum += features[i] * weights.inputWeights[i][h];
+      }
+
+      hidden[h] = relu(sum);
     }
 
-    private static double calculateLoss(
-            NNUEWeights weights,
-            List<TrainingExample> data,
-            NNUEFeatureExtractor extractor
-    ) {
+    /*
+     * First hidden -> second hidden.
+     */
+    double[] hidden2 = new double[NNUEWeights.SECOND_HIDDEN_SIZE];
 
-        double totalLoss = 0.0;
+    for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++) {
 
-        for (
-                TrainingExample example :
-                data
-        ) {
+      double sum = weights.secondHiddenBias[h2];
 
-            double[] features =
-                    extractor.extract(
-                            example.board
-                    );
+      for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++) {
 
-            ForwardResult forward =
-                    forward(
-                            weights,
-                            features
-                    );
+        sum += hidden[h] * weights.hiddenWeights[h][h2];
+      }
 
-            double target =
-                    normalizeTarget(
-                            example.evaluation
-                    );
-
-            double error =
-                    forward.output
-                            -
-                            target;
-
-            totalLoss +=
-                    error * error;
-        }
-
-        return totalLoss / data.size();
+      hidden2[h2] = relu(sum);
     }
 
-    private static double normalizeTarget(
-            double evaluation
-    ) {
+    /*
+     * Second hidden -> output.
+     */
+    double rawOutput = weights.outputBias;
 
-        return Math.tanh(
-                evaluation
-                        * 100.0
-                        /
-                        TARGET_SCALE
-        );
+    for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++) {
+
+      rawOutput += hidden2[h2] * weights.outputWeights[h2];
     }
 
-    private static ForwardResult forward(
-            NNUEWeights weights,
-            double[] features
-    ) {
+    double output = Math.tanh(rawOutput);
 
-        double[] hidden =
-                new double[
-                        NNUEWeights.HIDDEN_SIZE
-                        ];
+    return new ForwardResult(hidden, hidden2, rawOutput, output);
+  }
 
-        /*
-         * Input -> first hidden.
-         *
-         * Skip all zero features.
-         */
-        for (
-                int h = 0;
-                h < NNUEWeights.HIDDEN_SIZE;
-                h++
-        ) {
+  private static void backward(
+      NNUEWeights weights,
+      Gradients gradients,
+      double[] features,
+      ForwardResult forward,
+      double target) {
 
-            double sum =
-                    weights.hiddenBias[h];
+    /*
+     * MSE:
+     *
+     * (output - target)^2
+     */
+    double outputError = 2.0 * (forward.output - target);
 
-            for (
-                    int i = 0;
-                    i < NNUEWeights.INPUT_SIZE;
-                    i++
-            ) {
+    /*
+     * tanh derivative:
+     *
+     * 1 - tanh(x)^2
+     */
+    double tanhDerivative = 1.0 - forward.output * forward.output;
 
-                if (features[i] == 0.0) {
-                    continue;
-                }
+    double rawOutputGradient = outputError * tanhDerivative;
 
-                sum +=
-                        features[i]
-                                *
-                                weights.inputWeights[i][h];
-            }
+    gradients.outputBias += rawOutputGradient;
 
-            hidden[h] =
-                    relu(sum);
-        }
+    /*
+     * Output weights.
+     */
+    double[] hidden2Gradient = new double[NNUEWeights.SECOND_HIDDEN_SIZE];
 
-        /*
-         * First hidden -> second hidden.
-         */
-        double[] hidden2 =
-                new double[
-                        NNUEWeights.SECOND_HIDDEN_SIZE
-                        ];
+    for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++) {
 
-        for (
-                int h2 = 0;
-                h2 < NNUEWeights.SECOND_HIDDEN_SIZE;
-                h2++
-        ) {
+      gradients.outputWeights[h2] += rawOutputGradient * forward.hidden2[h2];
 
-            double sum =
-                    weights.secondHiddenBias[h2];
-
-            for (
-                    int h = 0;
-                    h < NNUEWeights.HIDDEN_SIZE;
-                    h++
-            ) {
-
-                sum +=
-                        hidden[h]
-                                *
-                                weights.hiddenWeights[h][h2];
-            }
-
-            hidden2[h2] =
-                    relu(sum);
-        }
-
-        /*
-         * Second hidden -> output.
-         */
-        double rawOutput =
-                weights.outputBias;
-
-        for (
-                int h2 = 0;
-                h2 < NNUEWeights.SECOND_HIDDEN_SIZE;
-                h2++
-        ) {
-
-            rawOutput +=
-                    hidden2[h2]
-                            *
-                            weights.outputWeights[h2];
-        }
-
-        double output =
-                Math.tanh(rawOutput);
-
-        return new ForwardResult(
-                hidden,
-                hidden2,
-                rawOutput,
-                output
-        );
+      hidden2Gradient[h2] = rawOutputGradient * weights.outputWeights[h2];
     }
 
-    private static void backward(
-            NNUEWeights weights,
-            Gradients gradients,
-            double[] features,
-            ForwardResult forward,
-            double target
-    ) {
+    /*
+     * Second hidden layer.
+     */
+    double[] hiddenGradient = new double[NNUEWeights.HIDDEN_SIZE];
 
-        /*
-         * MSE:
-         *
-         * (output - target)^2
-         */
-        double outputError =
-                2.0 *
-                        (
-                                forward.output
-                                        -
-                                        target
-                        );
+    for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++) {
 
-        /*
-         * tanh derivative:
-         *
-         * 1 - tanh(x)^2
-         */
-        double tanhDerivative =
-                1.0
-                        -
-                        forward.output
-                                *
-                                forward.output;
+      double gradient = hidden2Gradient[h2];
 
-        double rawOutputGradient =
-                outputError
-                        *
-                        tanhDerivative;
+      /*
+       * ReLU derivative.
+       */
+      if (forward.hidden2[h2] <= 0.0) {
+        gradient = 0.0;
+      }
 
-        gradients.outputBias +=
-                rawOutputGradient;
+      gradients.secondHiddenBias[h2] += gradient;
 
-        /*
-         * Output weights.
-         */
-        double[] hidden2Gradient =
-                new double[
-                        NNUEWeights.SECOND_HIDDEN_SIZE
-                        ];
+      for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++) {
 
-        for (
-                int h2 = 0;
-                h2 < NNUEWeights.SECOND_HIDDEN_SIZE;
-                h2++
-        ) {
+        gradients.hiddenWeights[h][h2] += gradient * forward.hidden[h];
 
-            gradients.outputWeights[h2] +=
-                    rawOutputGradient
-                            *
-                            forward.hidden2[h2];
-
-            hidden2Gradient[h2] =
-                    rawOutputGradient
-                            *
-                            weights.outputWeights[h2];
-        }
-
-        /*
-         * Second hidden layer.
-         */
-        double[] hiddenGradient =
-                new double[
-                        NNUEWeights.HIDDEN_SIZE
-                        ];
-
-        for (
-                int h2 = 0;
-                h2 < NNUEWeights.SECOND_HIDDEN_SIZE;
-                h2++
-        ) {
-
-            double gradient =
-                    hidden2Gradient[h2];
-
-            /*
-             * ReLU derivative.
-             */
-            if (forward.hidden2[h2] <= 0.0) {
-                gradient = 0.0;
-            }
-
-            gradients.secondHiddenBias[h2] +=
-                    gradient;
-
-            for (
-                    int h = 0;
-                    h < NNUEWeights.HIDDEN_SIZE;
-                    h++
-            ) {
-
-                gradients.hiddenWeights[h][h2] +=
-                        gradient
-                                *
-                                forward.hidden[h];
-
-                hiddenGradient[h] +=
-                        gradient
-                                *
-                                weights.hiddenWeights[h][h2];
-            }
-        }
-
-        /*
-         * First hidden layer.
-         */
-        for (
-                int h = 0;
-                h < NNUEWeights.HIDDEN_SIZE;
-                h++
-        ) {
-
-            double gradient =
-                    hiddenGradient[h];
-
-            /*
-             * ReLU derivative.
-             */
-            if (forward.hidden[h] <= 0.0) {
-                gradient = 0.0;
-            }
-
-            gradients.hiddenBias[h] +=
-                    gradient;
-
-            /*
-             * Only update weights corresponding
-             * to active features.
-             */
-            for (
-                    int i = 0;
-                    i < NNUEWeights.INPUT_SIZE;
-                    i++
-            ) {
-
-                if (features[i] == 0.0) {
-                    continue;
-                }
-
-                gradients.inputWeights[i][h] +=
-                        gradient
-                                *
-                                features[i];
-            }
-        }
+        hiddenGradient[h] += gradient * weights.hiddenWeights[h][h2];
+      }
     }
 
-    private static double relu(
-            double value
-    ) {
+    /*
+     * First hidden layer.
+     */
+    for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++) {
 
-        return Math.max(
-                0.0,
-                value
-        );
+      double gradient = hiddenGradient[h];
+
+      /*
+       * ReLU derivative.
+       */
+      if (forward.hidden[h] <= 0.0) {
+        gradient = 0.0;
+      }
+
+      gradients.hiddenBias[h] += gradient;
+
+      /*
+       * Only update weights corresponding
+       * to active features.
+       */
+      for (int i = 0; i < NNUEWeights.INPUT_SIZE; i++) {
+
+        if (features[i] == 0.0) {
+          continue;
+        }
+
+        gradients.inputWeights[i][h] += gradient * features[i];
+      }
+    }
+  }
+
+  private static double relu(double value) {
+
+    return Math.max(0.0, value);
+  }
+
+  private record TrainingExample(Board board, double evaluation) {}
+
+  private record ForwardResult(
+      double[] hidden, double[] hidden2, double rawOutput, double output) {}
+
+  private static class Gradients {
+
+    double[][] inputWeights;
+
+    double[] hiddenBias;
+
+    double[][] hiddenWeights;
+
+    double[] secondHiddenBias;
+
+    double[] outputWeights;
+
+    double outputBias;
+
+    Gradients() {
+
+      inputWeights = new double[NNUEWeights.INPUT_SIZE][NNUEWeights.HIDDEN_SIZE];
+
+      hiddenBias = new double[NNUEWeights.HIDDEN_SIZE];
+
+      hiddenWeights = new double[NNUEWeights.HIDDEN_SIZE][NNUEWeights.SECOND_HIDDEN_SIZE];
+
+      secondHiddenBias = new double[NNUEWeights.SECOND_HIDDEN_SIZE];
+
+      outputWeights = new double[NNUEWeights.SECOND_HIDDEN_SIZE];
     }
 
-    private record TrainingExample(
-            Board board,
-            double evaluation
-    ) {}
+    void scale(double factor) {
 
-    private record ForwardResult(
-            double[] hidden,
-            double[] hidden2,
-            double rawOutput,
-            double output
-    ) {}
+      for (int i = 0; i < inputWeights.length; i++) {
 
-    private static class Gradients {
+        for (int h = 0; h < inputWeights[i].length; h++) {
 
-        double[][] inputWeights;
-
-        double[] hiddenBias;
-
-        double[][] hiddenWeights;
-
-        double[] secondHiddenBias;
-
-        double[] outputWeights;
-
-        double outputBias;
-
-        Gradients() {
-
-            inputWeights =
-                    new double[
-                            NNUEWeights.INPUT_SIZE
-                            ][
-                            NNUEWeights.HIDDEN_SIZE
-                            ];
-
-            hiddenBias =
-                    new double[
-                            NNUEWeights.HIDDEN_SIZE
-                            ];
-
-            hiddenWeights =
-                    new double[
-                            NNUEWeights.HIDDEN_SIZE
-                            ][
-                            NNUEWeights.SECOND_HIDDEN_SIZE
-                            ];
-
-            secondHiddenBias =
-                    new double[
-                            NNUEWeights.SECOND_HIDDEN_SIZE
-                            ];
-
-            outputWeights =
-                    new double[
-                            NNUEWeights.SECOND_HIDDEN_SIZE
-                            ];
+          inputWeights[i][h] *= factor;
         }
+      }
 
-        void scale(
-                double factor
-        ) {
+      for (int h = 0; h < hiddenBias.length; h++) {
 
-            for (
-                    int i = 0;
-                    i < inputWeights.length;
-                    i++
-            ) {
+        hiddenBias[h] *= factor;
+      }
 
-                for (
-                        int h = 0;
-                        h < inputWeights[i].length;
-                        h++
-                ) {
+      for (int h = 0; h < hiddenWeights.length; h++) {
 
-                    inputWeights[i][h] *=
-                            factor;
-                }
-            }
+        for (int h2 = 0; h2 < hiddenWeights[h].length; h2++) {
 
-            for (
-                    int h = 0;
-                    h < hiddenBias.length;
-                    h++
-            ) {
-
-                hiddenBias[h] *=
-                        factor;
-            }
-
-            for (
-                    int h = 0;
-                    h < hiddenWeights.length;
-                    h++
-            ) {
-
-                for (
-                        int h2 = 0;
-                        h2 < hiddenWeights[h].length;
-                        h2++
-                ) {
-
-                    hiddenWeights[h][h2] *=
-                            factor;
-                }
-            }
-
-            for (
-                    int h2 = 0;
-                    h2 < secondHiddenBias.length;
-                    h2++
-            ) {
-
-                secondHiddenBias[h2] *=
-                        factor;
-            }
-
-            for (
-                    int h2 = 0;
-                    h2 < outputWeights.length;
-                    h2++
-            ) {
-
-                outputWeights[h2] *=
-                        factor;
-            }
-
-            outputBias *=
-                    factor;
+          hiddenWeights[h][h2] *= factor;
         }
+      }
 
-        void clip(
-                double limit
-        ) {
+      for (int h2 = 0; h2 < secondHiddenBias.length; h2++) {
 
-            for (
-                    int i = 0;
-                    i < inputWeights.length;
-                    i++
-            ) {
+        secondHiddenBias[h2] *= factor;
+      }
 
-                for (
-                        int h = 0;
-                        h < inputWeights[i].length;
-                        h++
-                ) {
+      for (int h2 = 0; h2 < outputWeights.length; h2++) {
 
-                    inputWeights[i][h] =
-                            clamp(
-                                    inputWeights[i][h],
-                                    -limit,
-                                    limit
-                            );
-                }
-            }
+        outputWeights[h2] *= factor;
+      }
 
-            for (
-                    int h = 0;
-                    h < hiddenBias.length;
-                    h++
-            ) {
-
-                hiddenBias[h] =
-                        clamp(
-                                hiddenBias[h],
-                                -limit,
-                                limit
-                        );
-            }
-
-            for (
-                    int h = 0;
-                    h < hiddenWeights.length;
-                    h++
-            ) {
-
-                for (
-                        int h2 = 0;
-                        h2 < hiddenWeights[h].length;
-                        h2++
-                ) {
-
-                    hiddenWeights[h][h2] =
-                            clamp(
-                                    hiddenWeights[h][h2],
-                                    -limit,
-                                    limit
-                            );
-                }
-            }
-
-            for (
-                    int h2 = 0;
-                    h2 < secondHiddenBias.length;
-                    h2++
-            ) {
-
-                secondHiddenBias[h2] =
-                        clamp(
-                                secondHiddenBias[h2],
-                                -limit,
-                                limit
-                        );
-            }
-
-            for (
-                    int h2 = 0;
-                    h2 < outputWeights.length;
-                    h2++
-            ) {
-
-                outputWeights[h2] =
-                        clamp(
-                                outputWeights[h2],
-                                -limit,
-                                limit
-                        );
-            }
-
-            outputBias =
-                    clamp(
-                            outputBias,
-                            -limit,
-                            limit
-                    );
-        }
-
-        void apply(
-                NNUEWeights weights,
-                double learningRate
-        ) {
-
-            for (
-                    int i = 0;
-                    i < NNUEWeights.INPUT_SIZE;
-                    i++
-            ) {
-
-                for (
-                        int h = 0;
-                        h < NNUEWeights.HIDDEN_SIZE;
-                        h++
-                ) {
-
-                    weights.inputWeights[i][h] -=
-                            learningRate
-                                    *
-                                    inputWeights[i][h];
-                }
-            }
-
-            for (
-                    int h = 0;
-                    h < NNUEWeights.HIDDEN_SIZE;
-                    h++
-            ) {
-
-                weights.hiddenBias[h] -=
-                        learningRate
-                                *
-                                hiddenBias[h];
-            }
-
-            for (
-                    int h = 0;
-                    h < NNUEWeights.HIDDEN_SIZE;
-                    h++
-            ) {
-
-                for (
-                        int h2 = 0;
-                        h2 < NNUEWeights.SECOND_HIDDEN_SIZE;
-                        h2++
-                ) {
-
-                    weights.hiddenWeights[h][h2] -=
-                            learningRate
-                                    *
-                                    hiddenWeights[h][h2];
-                }
-            }
-
-            for (
-                    int h2 = 0;
-                    h2 < NNUEWeights.SECOND_HIDDEN_SIZE;
-                    h2++
-            ) {
-
-                weights.secondHiddenBias[h2] -=
-                        learningRate
-                                *
-                                secondHiddenBias[h2];
-
-                weights.outputWeights[h2] -=
-                        learningRate
-                                *
-                                outputWeights[h2];
-            }
-
-            weights.outputBias -=
-                    learningRate
-                            *
-                            outputBias;
-        }
-
-        private static double clamp(
-                double value,
-                double min,
-                double max
-        ) {
-
-            return Math.max(
-                    min,
-                    Math.min(
-                            max,
-                            value
-                    )
-            );
-        }
+      outputBias *= factor;
     }
+
+    void clip(double limit) {
+
+      for (int i = 0; i < inputWeights.length; i++) {
+
+        for (int h = 0; h < inputWeights[i].length; h++) {
+
+          inputWeights[i][h] = clamp(inputWeights[i][h], -limit, limit);
+        }
+      }
+
+      for (int h = 0; h < hiddenBias.length; h++) {
+
+        hiddenBias[h] = clamp(hiddenBias[h], -limit, limit);
+      }
+
+      for (int h = 0; h < hiddenWeights.length; h++) {
+
+        for (int h2 = 0; h2 < hiddenWeights[h].length; h2++) {
+
+          hiddenWeights[h][h2] = clamp(hiddenWeights[h][h2], -limit, limit);
+        }
+      }
+
+      for (int h2 = 0; h2 < secondHiddenBias.length; h2++) {
+
+        secondHiddenBias[h2] = clamp(secondHiddenBias[h2], -limit, limit);
+      }
+
+      for (int h2 = 0; h2 < outputWeights.length; h2++) {
+
+        outputWeights[h2] = clamp(outputWeights[h2], -limit, limit);
+      }
+
+      outputBias = clamp(outputBias, -limit, limit);
+    }
+
+    void apply(NNUEWeights weights, double learningRate) {
+
+      for (int i = 0; i < NNUEWeights.INPUT_SIZE; i++) {
+
+        for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++) {
+
+          weights.inputWeights[i][h] -= learningRate * inputWeights[i][h];
+        }
+      }
+
+      for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++) {
+
+        weights.hiddenBias[h] -= learningRate * hiddenBias[h];
+      }
+
+      for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++) {
+
+        for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++) {
+
+          weights.hiddenWeights[h][h2] -= learningRate * hiddenWeights[h][h2];
+        }
+      }
+
+      for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++) {
+
+        weights.secondHiddenBias[h2] -= learningRate * secondHiddenBias[h2];
+
+        weights.outputWeights[h2] -= learningRate * outputWeights[h2];
+      }
+
+      weights.outputBias -= learningRate * outputBias;
+    }
+
+    private static double clamp(double value, double min, double max) {
+
+      return Math.max(min, Math.min(max, value));
+    }
+  }
 }

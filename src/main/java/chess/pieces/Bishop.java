@@ -3,63 +3,56 @@ package chess.pieces;
 import chess.board.Board;
 import chess.board.Move;
 import chess.board.Position;
-
 import java.util.ArrayList;
 import java.util.List;
 
 public class Bishop extends Piece {
 
-    public Bishop(boolean white) {
-        super(white);
-    }
+  public Bishop(boolean white) {
+    super(white);
+  }
 
-    @Override
-    public char getSymbol() {
-        return white ? 'B' : 'b';
-    }
+  @Override
+  public char getSymbol() {
+    return white ? 'B' : 'b';
+  }
 
-    @Override
-    public int getValue() {
-        return 330;
-    }
+  @Override
+  public int getValue() {
+    return 330;
+  }
 
-    @Override
-    public List<Move> generateMoves(Position position, Board board) {
-        List<Move> moves = new ArrayList<>();
+  @Override
+  public List<Move> generateMoves(Position position, Board board) {
+    List<Move> moves = new ArrayList<>();
 
-        addDirection(moves, position, board, -1, -1);
-        addDirection(moves, position, board, -1, 1);
-        addDirection(moves, position, board, 1, -1);
-        addDirection(moves, position, board, 1, 1);
+    addDirection(moves, position, board, -1, -1);
+    addDirection(moves, position, board, -1, 1);
+    addDirection(moves, position, board, 1, -1);
+    addDirection(moves, position, board, 1, 1);
 
-        return moves;
-    }
+    return moves;
+  }
 
-    private void addDirection(
-            List<Move> moves,
-            Position start,
-            Board board,
-            int rowStep,
-            int columnStep
-    ) {
-        int row = start.getRow() + rowStep;
-        int column = start.getColumn() + columnStep;
+  private void addDirection(
+      List<Move> moves, Position start, Board board, int rowStep, int columnStep) {
+    int row = start.getRow() + rowStep;
+    int column = start.getColumn() + columnStep;
 
-        while (board.isValid(row, column)) {
-            Position target = new Position(row, column);
+    while (board.isValid(row, column)) {
+      Position target = new Position(row, column);
 
-            if (board.isEmpty(target)) {
-                moves.add(new Move(start, target));
-            } else {
-                if (board.isEnemyPiece(target, white)
-                        && !(board.getPiece(target) instanceof King)) {
-                    moves.add(new Move(start, target));
-                }
-                break;
-            }
-
-            row += rowStep;
-            column += columnStep;
+      if (board.isEmpty(target)) {
+        moves.add(new Move(start, target));
+      } else {
+        if (board.isEnemyPiece(target, white) && !(board.getPiece(target) instanceof King)) {
+          moves.add(new Move(start, target));
         }
+        break;
+      }
+
+      row += rowStep;
+      column += columnStep;
     }
+  }
 }
