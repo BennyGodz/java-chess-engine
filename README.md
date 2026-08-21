@@ -1,8 +1,6 @@
 # Java Chess Engine
 
-A chess engine written entirely in Java with support for a terminal interface, an opening book, and direct Lichess integration.
-
-The project was built from scratch without relying on external chess libraries. Every major component, including move generation, rule enforcement, search, evaluation, and communication with the Lichess API, was implemented manually.
+A chess engine written entirely in Java with support for a terminal interface, an opening book, and direct Lichess integration. The project was built from scratch without relying on external chess libraries. Every major component -- move generation, rule enforcement, search, evaluation, and communication with the Lichess API -- was implemented manually.
 
 ## Features
 
@@ -33,12 +31,11 @@ The evaluation function combines material and positional factors.
 
 The engine includes an opening book that selects a prepared opening at the beginning of each game.
 
-- Random opening selection
+- Prepared opening lines
 - Multiple opening variations
 - Automatic synchronization with terminal games
-- Automatic synchronization with Lichess games
-- Fallback to normal search if the opponent deviates from the selected line
 - Tactical verification before playing a book move
+- Automatic fallback to normal search if the opponent deviates from the selected line
 
 ### Terminal Interface
 
@@ -51,23 +48,15 @@ The engine accepts Standard Algebraic Notation (SAN), including:
 - `e4`
 - `Nf3`
 - `Nbd2`
-- `Nfd2`
 - `R1e2`
-- `R8e2`
-- `Raxe2`
 - `Bxe6+`
-- `Qh7#`
 - `O-O`
 - `O-O-O`
 - `e8=Q`
-- `e8=R`
-- `e8=B`
-- `e8=N`
 
 Coordinate notation is also accepted:
 
 - `e2e4`
-- `e2-e4`
 - `e2 e4`
 - `e7e8Q`
 
@@ -103,7 +92,7 @@ The engine can connect directly to a Lichess bot account.
 Supported features include:
 
 - Challenge acceptance
-- Real time game streaming
+- Real-time game streaming
 - Automatic board reconstruction
 - UCI move conversion
 - Automatic move submission
@@ -117,7 +106,6 @@ src/main/java/chess
 ├── Main.java
 ├── board
 │   ├── Board.java
-│   ├── Move.java
 │   └── Position.java
 ├── pieces
 │   ├── Bishop.java
@@ -139,13 +127,13 @@ src/main/java/chess
 
 ## Commands
 
-- `moves` — list all legal moves in SAN
-- `fen` — print the current FEN
-- `eval` — run the search engine and display the current evaluation
-- `claim50` — claim a 50-move draw
-- `claim3` — claim a threefold repetition draw
-- `help` — print help information
-- `quit` — exit the program
+- `moves` -- list all legal moves in SAN
+- `fen` -- print the current FEN
+- `eval` -- run the search engine and display the current evaluation
+- `claim50` -- claim a 50-move draw
+- `claim3` -- claim a threefold repetition draw
+- `help` -- print help information
+- `quit` -- exit the program
 
 ## Search Algorithm
 
@@ -201,17 +189,17 @@ The source can also be compiled directly with `javac`.
 ## Example
 
 ```text
-================================
+=============================
         JAVA CHESS ENGINE
-================================
+=============================
 
 You are playing White.
 
 8 r n b q k b n r
 7 p p p p p p p p
 6 . . . . . . . .
-5 . . . . . . . .
-4 . . . . P . . .
+5 . . . . P . . .
+4 . . . . . . . .
 3 . . . . . . . .
 2 P P P P . P P P
 1 R N B Q K B N R
@@ -227,3 +215,5 @@ Engine plays Nf6 [depth 9, nodes 245,318]
 ## Author
 
 **Benny Yampolskiy**
+
+Java Chess Engine -- built from scratch without external chess libraries.

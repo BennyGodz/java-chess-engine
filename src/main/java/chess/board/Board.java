@@ -32,13 +32,161 @@ public class Board {
   /** Fullmove number from FEN/PGN semantics. Starts at 1 and increments after Black moves. */
   private int fullmoveNumber = 1;
 
-  /** Position counts used for threefold/fivefold repetition. */
+/** Position counts used for threefold/fivefold repetition. */
   private final Map<String, Integer> repetitionCounts = new HashMap<>();
 
-  public Board() {
+  // Zobrist hashing key for position identification
+  private long zobristKey;
+
+  // Static Zobrist key tables (initialized in static block below)
+  private static final long[][] PIECE_KEYS;
+  private static final long[] CASTLING_KEYS;
+  private static final long[] EN_PASSANT_KEYS;
+  private static final long SIDE_TO_MOVE_KEY;
+
+  static {
+    java.util.Random rand = new java.util.Random(0);
+    PIECE_KEYS = new long[6][64];
+    CASTLING_KEYS = new long[16];
+    EN_PASSANT_KEYS = new long[64];
+    for (int p = 0; p < 6; p++) {
+      for (int s = 0; s < 64; s++) {
+        PIECE_KEYS[p][s] = rand.nextLong();
+      }
+    }
+    for (int i = 0; i < 16; i++) {
+      CASTLING_KEYS[i] = rand.nextLong();
+    }
+    for (int i = 0; i < 64; i++) {
+      EN_PASSANT_KEYS[i] = rand.nextLong();
+    }
+    SIDE_TO_MOVE_KEY = rand.nextLong();
+  }
+
+public Board() {
     board = new Piece[8][8];
     setupStartingPosition();
     repetitionCounts.put(getPositionKey(), 1);
+    this.zobristKey = initZobristKey();
+  }
+
+  private long initZobristKey() {
+    long key = 0;
+    // XOR piece keys
+    for (int row = 0; row < 8; row++) {
+      for (int column = 0; column < 8; column++) {
+        Piece piece = board[row][column];
+        if (piece != null) {
+          int pieceType = piece.isWhite() ? piece.getSymbol() - 'A' + 6 : piece.getSymbol() - 'a';
+          // Map: Pawn=0, Knight=1, Bishop=2, Rook=3, Queen=4, King=5
+          if (piece instanceof Pawn) pieceType = 0;
+          else if (piece instanceof Knight) pieceType = 1;
+          else if (piece instanceof Bishop) pieceType = 2;
+          else if (piece instanceof Rook) pieceType = 3;
+          else if (piece instanceof Queen) pieceType = 4;
+          else if (piece instanceof King) pieceType = 5;
+          key ^= Board.PIECE_KEYS[pieceType][row * 8 + column];
+        }
+      }
+    }
+    // XOR castling rights
+    int castling = 0;
+    if (whiteKingsideCastle) castling |= 8;
+    if (whiteQueensideCastle) castling |= 4;
+    if (blackKingsideCastle) castling |= 2;
+    if (blackQueensideCastle) castling |= 1;
+    key ^= Board.CASTLING_KEYS[castling];
+    // XOR en passant key
+    if (enPassantTarget != null) {
+      key ^= Board.EN_PASSANT_KEYS[enPassantTarget.getRow() * 8 + enPassantTarget.getColumn()];
+    }
+    // XOR side to move key
+    key ^= (whiteToMove ? 0 : Board.SIDE_TO_MOVE_KEY);
+    return key;
+  }
+
+  /** Compute bishop attacks for given occupancy bitboard. */
+  private long computeBishopAttacks(int square, long occupancy) {
+    long result = 0;
+    int row = square / 8;
+    int col = square % 8;
+
+    // Four diagonal directions
+    // Up-Right
+    int r = row - 1;
+    int c = col + 1;
+    while (r >= 0 && c < 8) {
+      result |= 1L << (r * 8 + c);
+      if ((occupancy & (1L << (r * 8 + c))) != 0) break;
+      r--;
+      c++;
+    }
+    // Up-Left
+    r = row - 1;
+    c = col - 1;
+    while (r >= 0 && c >= 0) {
+      result |= 1L << (r * 8 + c);
+      if ((occupancy & (1L << (r * 8 + c))) != 0) break;
+      r--;
+      c--;
+    }
+    // Down-Right
+    r = row + 1;
+    c = col + 1;
+    while (r < 8 && c < 8) {
+      result |= 1L << (r * 8 + c);
+      if ((occupancy & (1L << (r * 8 + c))) != 0) break;
+      r++;
+      c++;
+    }
+    // Down-Left
+    r = row + 1;
+    c = col - 1;
+    while (r < 8 && c >= 0) {
+      result |= 1L << (r * 8 + c);
+      if ((occupancy & (1L << (r * 8 + c))) != 0) break;
+      r++;
+      c--;
+    }
+    return result;
+  }
+
+  /** Compute rook attacks for given occupancy bitboard. */
+  private long computeRookAttacks(int square, long occupancy) {
+    long result = 0;
+    int row = square / 8;
+    int col = square % 8;
+
+    // Four orthogonal directions
+    // Up
+    int r = row - 1;
+    while (r >= 0) {
+      result |= 1L << (r * 8 + col);
+      if ((occupancy & (1L << (r * 8 + col))) != 0) break;
+      r--;
+    }
+    // Down
+    r = row + 1;
+    while (r < 8) {
+      result |= 1L << (r * 8 + col);
+      if ((occupancy & (1L << (r * 8 + col))) != 0) break;
+      r++;
+    }
+    // Left
+    int c = col - 1;
+    while (c >= 0) {
+      result |= 1L << (row * 8 + c);
+      if ((occupancy & (1L << (row * 8 + c))) != 0) break;
+      c--;
+    }
+    // Right
+    c = col + 1;
+    while (c < 8) {
+      result |= 1L << (row * 8 + c);
+      if ((occupancy & (1L << (row * 8 + c))) != 0) break;
+      c++;
+    }
+    return result;
   }
 
   /** Deep copy used for move simulation. History is copied so state queries remain consistent. */
@@ -364,6 +512,12 @@ public class Board {
     whiteToMove = !whiteToMove;
 
     repetitionCounts.merge(getPositionKey(), 1, Integer::sum);
+    this.zobristKey = initZobristKey();
+  }
+
+  /** Returns the current Zobrist key for the position. */
+  public long getZobristKey() {
+    return zobristKey;
   }
 
   private boolean isCapture(Move move, Piece movingPiece) {

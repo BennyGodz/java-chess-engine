@@ -13,11 +13,11 @@ import java.util.Scanner;
 /**
  * Console chess UI with SAN input and SAN output.
  *
- * <p>The engine is accessed directly through SearchEngine. No engine facade is used.
+ * The engine is accessed directly through SearchEngine. No engine facade is used.
  *
- * <p>The opening book is optional.
+ * The opening book is optional.
  *
- * <p>The engine checks opening moves before playing them. If an opponent deviates and makes the
+ * The engine checks opening moves before playing them. If an opponent deviates and makes the
  * book move bad, the engine abandons the opening and searches normally.
  */
 public class Main {
@@ -116,7 +116,7 @@ public class Main {
      */
     SearchEngine engine = new SearchEngine();
 
-    OpeningManager openingManager = new OpeningManager();
+    OpeningManager openingManager = new OpeningManager(engine);
 
     while (true) {
       board.printBoard(playerIsWhite);

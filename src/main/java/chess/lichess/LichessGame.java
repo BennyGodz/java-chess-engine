@@ -46,7 +46,7 @@ public class LichessGame {
     this.mapper = new ObjectMapper();
     this.engine = new SearchEngine();
     this.lichessClient = new LichessClient(token);
-    this.openingManager = new OpeningManager();
+    this.openingManager = new OpeningManager(engine);
     this.board = new Board();
   }
 
@@ -162,9 +162,17 @@ public class LichessGame {
   private long calculateSearchTime() {
     long myTime = botIsWhite ? wtimeMs : btimeMs;
     long myInc = botIsWhite ? wincMs : bincMs;
-    // Basic time management: target spending about 1/40th of our remaining time + some increment
+
+    if (myTime <= 0) return 100;  // Safety default if no time remaining
+
+    // Spend 1/40 of remaining time, with increment factor
     long targetTime = myTime / 40 + (myInc * 3 / 4);
-    return Math.max(100, Math.min(targetTime, myTime - 100)); // Leave at least 100ms cushion
+
+    // Reasonable caps: minimum 100ms, maximum 5 seconds for normal play
+    // For very long time controls (10+ min), allow up to 30 seconds
+    long maxAllowed = myTime > 600000 ? 30000L : 5000L;
+
+    return Math.max(100, Math.min(targetTime, maxAllowed));
   }
 
   private void rebuildBoardFromMoves(String moves) {

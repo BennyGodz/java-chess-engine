@@ -13,34 +13,26 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class StockfishDataGenerator {
   private static final String STOCKFISH_PATH = "C:\\Users\\Benny\\stockfish\\stockfish.exe";
   private static final String OUTPUT_FILE = "training_data.txt";
-  private static final int POSITION_COUNT = 500_000;
-  private static final int STOCKFISH_DEPTH = 16;
+  private static final String OUTPUT_MOVES_FILE = "training_moves.txt";
+  private static final int POSITION_COUNT = 750_000;
+  private static final int STOCKFISH_DEPTH = 10;
   private static final int GAMES_PER_PLAYER = 100;
   private static final int MIN_PLIES = 8;
-  private static final int POSITION_INTERVAL = 2;
+  private static final int POSITION_INTERVAL = 1;
   private static final Random RANDOM = new Random(12345);
 
   private static final List<String> PLAYERS =
       List.of(
           "Ediz_Gurel",
-          "KnightCheckShadow",
-          "GlasnostPerestroika",
-          "muisback",
           "SindarovGM",
+          "muisback",
+          "GlasnostPerestroika",
           "Arkadiy_Khromaev",
-          "chess-art-us",
-          "SergioOliva64",
           "VincentKeymer2004",
-          "Zhigalko_Sergei",
-          "cutemouse83",
-          "aspiringstar",
-          "Vladimirovich9000",
           "Savitar_f",
           "Dr_Tiger",
-          "mraquariyaz67",
-          "athena-pallada",
+          "MonaLisa",
           "Polyclinical",
-          "Yarebore",
           "Unicorn7Love",
           "Kurald_Galain",
           "Anatolianchess",
@@ -50,16 +42,11 @@ public class StockfishDataGenerator {
           "bakingintheoven",
           "chessmem",
           "T34USSR",
-          "OX528354",
-          "KryptoChessClub",
-          "Vlad_Lazarev79",
-          "gek76",
-          "Kayrosas",
-          "Tem7702",
-          "ChessTheory64",
-          "MW1966",
-          "alesha_kiselev",
-          "Mikevs");
+          "KryptoChessClub");
+
+  private static final int MAX_RETRIES_PER_PLAYER = 3;
+  private static final long INITIAL_DELAY_MS = 600;
+  private static final double DELAY_MULTIPLIER = 2.0;
 
   private static final ThreadLocal<Stockfish> stockfishPool =
       ThreadLocal.withInitial(
@@ -77,16 +64,50 @@ public class StockfishDataGenerator {
     List<String> shuffledPlayers = new ArrayList<>(PLAYERS);
     Collections.shuffle(shuffledPlayers, RANDOM);
 
+    PrintWriter movesPrintWriter = null;
+    try {
+      movesPrintWriter = new PrintWriter(new FileWriter(OUTPUT_MOVES_FILE));
+    } catch (IOException e) {
+      System.err.println("Could not create moves file: " + e.getMessage());
+      movesPrintWriter = null;
+    }
+
     for (String username : shuffledPlayers) {
       if (uniqueFens.size() >= POSITION_COUNT) break;
       System.out.println("Fetching games from: " + username);
-      try {
-        fetchFensFromPlayer(username, uniqueFens);
-      } catch (Exception e) {
-        System.err.println("Could not process " + username + ": " + e.getMessage());
+      int retries = 0;
+      long delayMs = INITIAL_DELAY_MS;
+      boolean success = false;
+      while (retries < MAX_RETRIES_PER_PLAYER && !success) {
+        try {
+          Thread.sleep(delayMs);
+          fetchFensFromPlayer(username, uniqueFens, movesPrintWriter);
+          success = true;
+        } catch (IOException e) {
+          if (e.getMessage().contains("429")) {
+            System.err.println("Rate limited for " + username + ", retry " + (retries + 1) + "/" + MAX_RETRIES_PER_PLAYER);
+            retries++;
+            delayMs = (long) (INITIAL_DELAY_MS * Math.pow(DELAY_MULTIPLIER, retries));
+          } else {
+            System.err.println("Error processing " + username + ": " + e.getMessage());
+            break;
+          }
+        } catch (Exception e) {
+          System.err.println("Error processing " + username + ": " + e.getMessage());
+          break;
+        }
+      }
+      if (!success) {
+        System.err.println("Skipping player " + username + " after " + MAX_RETRIES_PER_PLAYER + " retries");
       }
       System.out.println("Total FENs collected: " + uniqueFens.size());
     }
+
+    if (movesPrintWriter != null) {
+      movesPrintWriter.flush();
+      movesPrintWriter.close();
+    }
+    System.out.println("Total FENs collected: " + uniqueFens.size());
 
     List<String> tempFensList = new ArrayList<>(uniqueFens);
     if (tempFensList.size() > POSITION_COUNT)
@@ -125,7 +146,7 @@ public class StockfishDataGenerator {
     }
   }
 
-  private static void fetchFensFromPlayer(String username, Set<String> uniqueFens)
+  private static void fetchFensFromPlayer(String username, Set<String> uniqueFens, PrintWriter movesPrintWriter)
       throws Exception {
     String urlString =
         "https://lichess.org/api/games/user/"
@@ -140,7 +161,7 @@ public class StockfishDataGenerator {
     connection.setConnectTimeout(15000);
     connection.setReadTimeout(60000);
 
-    if (connection.getResponseCode() != 200)
+    if (connection.getResponseCode() != 000)
       throw new IOException("Lichess returned HTTP " + connection.getResponseCode());
     try (BufferedReader reader =
         new BufferedReader(
@@ -150,7 +171,7 @@ public class StockfishDataGenerator {
       while ((line = reader.readLine()) != null) {
         if (line.trim().isEmpty()) {
           if (currentGame.length() > 0) {
-            processGameForFens(currentGame.toString(), uniqueFens);
+            processGameForFens(currentGame.toString(), uniqueFens, movesPrintWriter);
             currentGame.setLength(0);
             if (uniqueFens.size() >= POSITION_COUNT) return;
           }
@@ -159,18 +180,19 @@ public class StockfishDataGenerator {
         }
       }
       if (currentGame.length() > 0 && uniqueFens.size() < POSITION_COUNT) {
-        processGameForFens(currentGame.toString(), uniqueFens);
+        processGameForFens(currentGame.toString(), uniqueFens, movesPrintWriter);
       }
     } finally {
       connection.disconnect();
     }
   }
 
-  private static void processGameForFens(String pgn, Set<String> uniqueFens) {
+  private static void processGameForFens(String pgn, Set<String> uniqueFens, PrintWriter movesPrintWriter) throws Exception {
     try {
       List<String> moves = extractMoves(pgn);
       if (moves.size() < MIN_PLIES) return;
       Board board = new Board();
+      String lastMoveSan = "";
       for (int ply = 0; ply < moves.size(); ply++) {
         Move move = findMoveFromSAN(board, moves.get(ply));
         if (move == null) return;
@@ -180,8 +202,13 @@ public class StockfishDataGenerator {
           if (uniqueFens.size() >= POSITION_COUNT) return;
           if (!board.getLegalMoves(board.isWhiteToMove()).isEmpty()) {
             uniqueFens.add(board.toFEN());
+            if (movesPrintWriter != null) {
+              movesPrintWriter.write(board.toFEN() + "|" + lastMoveSan);
+              movesPrintWriter.println();
+            }
           }
         }
+        lastMoveSan = moves.get(ply);
       }
     } catch (Exception e) {
       // ignore bad games

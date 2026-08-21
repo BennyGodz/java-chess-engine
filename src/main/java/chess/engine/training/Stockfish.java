@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets;
 /**
  * Handles communication with Stockfish through the UCI protocol.
  *
- * <p>Stockfish must be installed separately.
+ * PStockfish must be installed separately.
  */
 public class Stockfish implements AutoCloseable {
 
@@ -39,11 +39,11 @@ public class Stockfish implements AutoCloseable {
   /**
    * Evaluate a position using Stockfish.
    *
-   * <p>Returns evaluation from White's perspective.
+   * Returns evaluation from White's perspective.
    *
-   * <p>Example:
+   * Example:
    *
-   * <p>cp 35 -> 0.35 cp -120 -> -1.20
+   * cp 35 -> 0.35 cp -120 -> -1.20
    */
   public double evaluate(String fen, int depth) throws IOException {
 

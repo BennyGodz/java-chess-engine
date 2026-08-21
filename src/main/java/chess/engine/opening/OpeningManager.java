@@ -2,6 +2,7 @@ package chess.engine.opening;
 
 import chess.board.Board;
 import chess.board.Move;
+import chess.engine.search.SearchEngine;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -19,19 +20,19 @@ import java.util.Random;
 public class OpeningManager {
 
   private final OpeningBook openingBook;
+  private final SearchEngine searchEngine;
   private final Random random;
   private final List<String> playedMoves;
+  private long zobristKey;
 
   private boolean openingActive;
 
-  public OpeningManager() {
-
+  public OpeningManager(SearchEngine searchEngine) {
+    this.searchEngine = searchEngine;
     this.openingBook = new OpeningBook();
-
     this.random = new Random();
-
     this.playedMoves = new ArrayList<>();
-
+    this.zobristKey = searchEngine.getZobristKey();
     this.openingActive = true;
   }
 

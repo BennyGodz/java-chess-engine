@@ -42,10 +42,21 @@ public class NNUE {
       hidden2[h2] = relu(sum);
     }
 
+    double[] hidden3 = new double[NNUEWeights.THIRD_HIDDEN_SIZE];
+
+    for (int h3 = 0; h3 < NNUEWeights.THIRD_HIDDEN_SIZE; h3++) {
+      double sum = weights.thirdHiddenBias[h3];
+
+      for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++)
+        sum += hidden2[h2] * weights.secondHiddenWeights[h2][h3];
+
+      hidden3[h3] = relu(sum);
+    }
+
     double output = weights.outputBias;
 
-    for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++)
-      output += hidden2[h2] * weights.outputWeights[h2];
+    for (int h3 = 0; h3 < NNUEWeights.THIRD_HIDDEN_SIZE; h3++)
+      output += hidden3[h3] * weights.outputWeights[h3];
 
     return (int) Math.round(Math.tanh(output) * OUTPUT_SCALE);
   }
