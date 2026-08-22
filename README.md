@@ -27,6 +27,61 @@ The evaluation function combines material and positional factors.
 - Reduced early queen movement
 - Reduced early knight overdevelopment
 
+### Learning from Games
+
+The engine's neural evaluation (NNUE) is trained on complete chess GAMES, not on individually
+labelled positions. Every PGN game supplies one supervision signal -- its final result -- and every
+position in that game is trained to predict which side the game belonged to (+1 win, 0 draw, -1
+loss from the side to move's perspective). No external engine such as Stockfish is involved.
+
+The training pipeline lives in `chess.engine.training`:
+
+```text
+OpeningBook ──► SelfPlayGenerator ──┐
+                                    ├──►  games/**/*.pgn  ──►  GameTrainer
+Lichess API ──► LichessGameDownloader┘      (or drop any PGN)         │
+                                                                   ▼
+                                                      nnue_weights.bin
+                                                                   ▼
+                                        SearchEngine ──► Evaluator ──► NNUEEvaluator
+```
+
+- `SelfPlayGenerator` -- plays engine-vs-engine games IN PARALLEL from random opening book lines
+  with a small amount of early-move randomness, adjudicates clearly decided endgames by material,
+  and writes standard PGN batches (including results) to `games/selfplay/`.
+- `LichessGameDownloader` -- optionally downloads recent games of strong players as whole PGN files
+  into `games/lichess/`.
+- `GameTrainer` -- parses and replays every PGN under `games/`, trains the network against game
+  outcomes with mini-batch SGD, validates on held-out games (the split is per game so positions of
+  one game never leak between sets), and saves the best network to `nnue_weights.bin`, which the
+  engine loads automatically.
+- `TrainingPipeline` -- runs the full self-improvement loop: generate games with the current
+  network, train, repeat. Each iteration's games are played with the weights trained in the previous
+  iteration, so evaluation quality compounds.
+
+Training commands:
+
+```bash
+# Full self-improvement run (defaults: 10 iterations x 256 games, 200 ms/move, half the cores)
+java -cp build/classes/java/main chess.engine.training.TrainingPipeline
+
+# Custom: 20 iterations x 512 games, 300 ms/move, 8 threads, 40 epochs each
+java -cp build/classes/java/main chess.engine.training.TrainingPipeline 20 512 300 8 40
+
+# Only generate games (defaults: 256 games, 200 ms per move)
+java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator
+
+# Download human games instead (optional)
+java -cp build/classes/java/main chess.engine.training.LichessGameDownloader 100
+
+# Train once from all games found in games/ (auto-generates self-play if none exist)
+java -cp build/classes/java/main chess.engine.training.GameTrainer 40
+```
+
+Note: outcome-based learning is data hungry. Meaningful strength gains require thousands of games
+and several pipeline iterations (hours to days of compute). The material component blended into the
+evaluation keeps play reasonable while the network is still weak.
+
 ### Opening Book
 
 The engine includes an opening book that selects a prepared opening at the beginning of each game.

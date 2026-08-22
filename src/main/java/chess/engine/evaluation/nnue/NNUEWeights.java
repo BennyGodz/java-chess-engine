@@ -5,7 +5,7 @@ import java.io.*;
 /**
  * Stores the weights used by the NNUE network.
  *
- * Architecture: 769 inputs → 128 hidden neurons → 64 hidden neurons → 1 output
+ * Architecture: 769 inputs → 256 hidden → 256 hidden → 128 hidden → 1 output
  */
 public class NNUEWeights {
 
@@ -33,12 +33,25 @@ public class NNUEWeights {
     outputWeights = new double[THIRD_HIDDEN_SIZE];
   }
 
-  /** Create randomly initialized weights with He initialization. */
-  public static NNUEWeights random() {
-    NNUEWeights weights = new NNUEWeights();
-    java.util.Random random = new java.util.Random(12345);
+  /**
+   * Expected number of non-zero inputs per position (~32 pieces + kings, flags and structural
+   * inputs). First-layer variance depends on ACTIVE inputs, not on {@link #INPUT_SIZE}; using the
+   * dense fan-in leaves first-layer pre-activations so small that many ReLU units are born dead
+   * and never recover.
+   */
+  private static final double EXPECTED_ACTIVE_INPUTS = 40.0;
 
-    double inputScale = Math.sqrt(2.0 / INPUT_SIZE);
+  /** Create randomly initialized weights with a fixed seed (deterministic, for fallbacks/tests). */
+  public static NNUEWeights random() {
+    return random(12345L);
+  }
+
+  /** Create randomly initialized weights with He initialization scaled to input sparsity. */
+  public static NNUEWeights random(long seed) {
+    NNUEWeights weights = new NNUEWeights();
+    java.util.Random random = new java.util.Random(seed);
+
+    double inputScale = Math.sqrt(2.0 / EXPECTED_ACTIVE_INPUTS);
     double hiddenScale = Math.sqrt(2.0 / HIDDEN_SIZE);
     double secondHiddenScale = Math.sqrt(2.0 / SECOND_HIDDEN_SIZE);
     double thirdHiddenScale = Math.sqrt(2.0 / THIRD_HIDDEN_SIZE);

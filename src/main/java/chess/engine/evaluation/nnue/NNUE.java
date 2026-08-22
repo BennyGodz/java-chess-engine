@@ -8,6 +8,20 @@ public class NNUE {
 
   private static final int OUTPUT_SCALE = 400;
 
+  /**
+   * Reusable per-thread activation buffers. evaluate() runs at EVERY search leaf; allocating
+   * ~700 doubles there showed up as pure GC pressure. ThreadLocal keeps instances safe when
+   * several engines run in parallel threads.
+   */
+  private final ThreadLocal<double[][]> scratch =
+      ThreadLocal.withInitial(
+          () ->
+              new double[][] {
+                new double[NNUEWeights.HIDDEN_SIZE],
+                new double[NNUEWeights.SECOND_HIDDEN_SIZE],
+                new double[NNUEWeights.THIRD_HIDDEN_SIZE]
+              });
+
   private final NNUEWeights weights;
   private final NNUEFeatureExtractor extractor;
 
@@ -18,20 +32,20 @@ public class NNUE {
 
   public int evaluate(Board board) {
     double[] features = extractor.extract(board);
-    double[] hidden = new double[NNUEWeights.HIDDEN_SIZE];
+    double[][] buffers = scratch.get();
+    double[] hidden = buffers[0];
+    double[] hidden2 = buffers[1];
+    double[] hidden3 = buffers[2];
 
     for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++) {
       double sum = weights.hiddenBias[h];
 
       for (int i = 0; i < NNUEWeights.INPUT_SIZE; i++) {
-        if (features[i] != 0.0)
-          sum += features[i] * weights.inputWeights[i][h];
+        if (features[i] != 0.0) sum += features[i] * weights.inputWeights[i][h];
       }
 
       hidden[h] = relu(sum);
     }
-
-    double[] hidden2 = new double[NNUEWeights.SECOND_HIDDEN_SIZE];
 
     for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++) {
       double sum = weights.secondHiddenBias[h2];
@@ -41,8 +55,6 @@ public class NNUE {
 
       hidden2[h2] = relu(sum);
     }
-
-    double[] hidden3 = new double[NNUEWeights.THIRD_HIDDEN_SIZE];
 
     for (int h3 = 0; h3 < NNUEWeights.THIRD_HIDDEN_SIZE; h3++) {
       double sum = weights.thirdHiddenBias[h3];

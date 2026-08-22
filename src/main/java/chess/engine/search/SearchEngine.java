@@ -43,13 +43,13 @@ public class SearchEngine {
   }
 
   private static class TTEntry {
-    String key;
+    long key;
     int depth;
     int score;
     TTFlag flag;
     Move bestMove;
 
-    TTEntry(String key, int depth, int score, TTFlag flag, Move bestMove) {
+    TTEntry(long key, int depth, int score, TTFlag flag, Move bestMove) {
       this.key = key;
       this.depth = depth;
       this.score = score;
@@ -209,11 +209,14 @@ public class SearchEngine {
     checkTime();
 
     boolean side = board.isWhiteToMove();
-    String positionKey = board.getPositionKey();
-    int ttIndex = positionKey.hashCode() & TT_MASK;
+    // 64-bit Zobrist hash maintained by Board; far cheaper than building the FEN-style
+    // position String every node. Collisions are handled by comparing the FULL key.
+    long positionKey = board.getZobristKey();
+    int ttIndex =
+        (int) (positionKey ^ (positionKey >>> 32)) & TT_MASK;
     TTEntry ttEntry = tt[ttIndex];
 
-    if (ttEntry != null && ttEntry.key.equals(positionKey) && ttEntry.depth >= depth) {
+    if (ttEntry != null && ttEntry.key == positionKey && ttEntry.depth >= depth) {
       if (ttEntry.flag == TTFlag.EXACT) return ttEntry.score;
       if (ttEntry.flag == TTFlag.ALPHA && ttEntry.score <= alpha) return alpha;
       if (ttEntry.flag == TTFlag.BETA && ttEntry.score >= beta) return beta;
@@ -234,8 +237,12 @@ public class SearchEngine {
       return quiescence(board, alpha, beta, ply, 0);
     }
 
-    // Null Move Pruning - enhanced with core search verification
-    if (allowNull && !board.isInCheck(side) && depth >= 3) {
+    /*
+     * Null Move Pruning - enhanced with core search verification. Skipped in zugzwang-prone
+     * cases: if the side to move holds no non-pawn material, passing would be illegal in a
+     * real game and the null-move reply can wildly overstate the score.
+     */
+    if (allowNull && !board.isInCheck(side) && depth >= 3 && hasNonPawnMaterial(board, side)) {
       Board nullBoard = new Board(board);
       nullBoard.makeNullMove();
       int nullScore = -negamax(nullBoard, depth - 3, -beta, -beta + 1, ply + 1, 0, false);
@@ -244,7 +251,7 @@ public class SearchEngine {
     }
 
     // Move ordering - TT move first, then killers, then captures, then quiet
-    Move ttMove = ttEntry != null && ttEntry.key.equals(positionKey) ? ttEntry.bestMove : null;
+    Move ttMove = ttEntry != null && ttEntry.key == positionKey ? ttEntry.bestMove : null;
     orderMoves(board, moves, ttMove, ply);
 
     // History heuristic reset - clear stale history periodically
@@ -435,7 +442,8 @@ public class SearchEngine {
           int captureDiff = captured.getValue() - attackerValue;
           // SEE: if capturing side loses material, apply razor margin
           if (captureDiff < 0) { // Losing capture
-            if (standPat + Math.abs(captureDiff) * 100 + 100 < alpha)
+            // captureDiff is already centipawns; prune only clearly losing captures.
+            if (standPat + Math.abs(captureDiff) + 100 < alpha)
               continue; // prune losing capture
           } else { // Winning capture
             if (standPat + captured.getValue() + 200 < alpha)
@@ -451,8 +459,20 @@ public class SearchEngine {
     return alpha;
   }
 
-  private boolean isEndgame(Board board) {
-    int queens = 0, rooks = 0, minors = 0, pawns = 0;
+  /** True if {@code white}'s army contains any piece besides king and pawns (null-move guard). */
+  private boolean hasNonPawnMaterial(Board board, boolean white) {
+    for (int r = 0; r < 8; r++) {
+      for (int c = 0; c < 8; c++) {
+        Piece piece = board.getPiece(new chess.board.Position(r, c));
+        if (piece == null || piece.isWhite() != white || piece instanceof chess.pieces.King)
+          continue;
+        if (!(piece instanceof chess.pieces.Pawn)) return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean isEndgame(Board board) {    int queens = 0, rooks = 0, minors = 0, pawns = 0;
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
         Piece piece = board.getPiece(new chess.board.Position(r, c));

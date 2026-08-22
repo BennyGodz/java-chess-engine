@@ -873,6 +873,7 @@ public Board() {
     enPassantTarget = null;
     halfmoveClock++;
     repetitionCounts.merge(getPositionKey(), 1, Integer::sum);
+    this.zobristKey = initZobristKey();
   }
 
   public String toFEN() {
@@ -1042,6 +1043,7 @@ public Board() {
      */
     repetitionCounts.clear();
     repetitionCounts.put(getPositionKey(), 1);
+    this.zobristKey = initZobristKey();
   }
 
   public void printBoard(boolean playerIsWhite) {
