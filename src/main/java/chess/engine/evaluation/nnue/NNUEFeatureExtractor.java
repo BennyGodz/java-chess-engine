@@ -5,29 +5,35 @@ import chess.board.Position;
 import chess.pieces.*;
 
 /**
- * Improved NNUE feature extractor with: - Piece-square features with color sign (769 total inputs)
- * - Full king position encoding - Pawn structure features (passed, backward, connected) - King
- * safety features (shielding, distance) - En passant and castling features
+ * Turns a board position into the NNUE network's input vector.
+ *
+ * <p>Feature layout (769 inputs total):
+ *
+ * <ul>
+ *   <li>0-383: piece-square features, signed by colour (+1 white, -1 black)
+ *   <li>384-511: white king square one-hot plus centre bonus
+ *   <li>512-639: black king square one-hot plus centre bonus
+ *   <li>640-663: pawn structure (passed, isolated, connected, backward, counts per file)
+ *   <li>664-679: king safety (distance, colour complex, attackers, shield, mobility, centre control)
+ *   <li>680-683: castling rights
+ *   <li>684: en passant availability
+ *   <li>768: side to move
+ * </ul>
  */
 public class NNUEFeatureExtractor {
 
-  /** Total input size: 769 features */
+  /** Total input size of the network. */
   public static final int INPUT_SIZE = 769;
 
   /**
-   * Extracts features from a board position for NNUE evaluation. Returns array of size INPUT_SIZE
-   * with double values. Positive values indicate white features, negative indicate black features.
+   * Extracts all features from a board into a fresh vector. White features are positive, black
+   * features negative.
    */
   public double[] extract(Board board) {
     double[] features = new double[INPUT_SIZE];
 
-    // ============
-    // Piece-Square Features (indices 0-383)
-    // 6 piece types × 64 squares = 384 features
-    // White pieces: positive values (+1.0)
-    // Black pieces: negative values (-1.0)
-    // This allows the network to distinguish color via sign
-    // ============
+    // Piece-square block: one slot per piece type and square, +1 for White, -1 for Black,
+    // which lets the network distinguish colour through the sign alone.
     for (int row = 0; row < 8; row++) {
       for (int col = 0; col < 8; col++) {
         Position pos = new Position(row, col);
@@ -53,77 +59,59 @@ public class NNUEFeatureExtractor {
       }
     }
 
-    // ============
-    // White King Position Features (indices 384-511)
-    // 128 features - one-hot encoding of white king square
-    // squareIndex 0-63 maps to features 384-447
-    // ============
+    // White king square (one-hot) and its small centre-control bonus.
     Position whiteKing = board.findKing(true);
     if (whiteKing != null) {
       int squareIndex = whiteKing.getRow() * 8 + whiteKing.getColumn();
       if (squareIndex >= 0 && squareIndex <= 63) {
         features[384 + squareIndex] = 1.0;
       }
-      // King safety: center control bonus
       int centerBonus = getKingCenterBonus(whiteKing);
       if (centerBonus > 0) {
         features[511] = centerBonus / 30.0;
       }
     }
 
-    // ============
-    // Black King Position Features (indices 512-639)
-    // 128 features - one-hot encoding of black king square
-    // ============
+    // Black king square (one-hot) and its negated centre-control bonus.
     Position blackKing = board.findKing(false);
     if (blackKing != null) {
       int squareIndex = blackKing.getRow() * 8 + blackKing.getColumn();
       if (squareIndex >= 0 && squareIndex <= 63) {
         features[512 + squareIndex] = 1.0;
       }
-      // King safety: center control bonus (negative for black, evaluated from white perspective)
       int centerBonus = getKingCenterBonus(blackKing);
       if (centerBonus > 0) {
         features[639] = -centerBonus / 30.0;
       }
     }
 
-    // ============
-    // Pawn Structure Features (indices 640-663, 24 features)
-    // ============
     addPawnStructureFeatures(board, features);
 
-    // ============
-    // King Safety Features (indices 664-679, 16 features)
-    // ============
     addKingSafetyFeatures(board, features);
 
-    // ============
-    // Castling Rights Features (indices 680-683, 4 features)
-    // ============
+    // Castling rights: positive for White, negative for Black.
     features[680] = board.canCastleKingside(true) ? 1.0 : 0.0;
     features[681] = board.canCastleQueenside(true) ? 1.0 : 0.0;
     features[682] = board.canCastleKingside(false) ? -1.0 : 0.0;
     features[683] = board.canCastleQueenside(false) ? -1.0 : 0.0;
 
-    // ============
-    // En Passant Feature (index 684): +1 when the side to move may capture en passant as
-    // White, -1 when it may do so as Black, 0 when no en-passant capture is set.
-    // ============
+    // En passant availability: +1 when White may capture, -1 when Black may.
     features[684] = board.getEnPassantTarget() != null ? 1.0 : 0.0;
     if (board.getEnPassantTarget() != null && !board.isWhiteToMove()) {
       features[684] = -1.0;
     }
 
-    // ============
-    // Side to Move Feature (index 768)
-    // ============
+    // Side to move.
     features[768] = board.isWhiteToMove() ? 1.0 : 0.0;
 
     return features;
   }
 
-  /** Adds pawn structure features to the feature vector. */
+  /**
+   * Fills the pawn structure block: passed-pawn bonus, isolated pawns, connected pawns, backward
+   * pawns and per-file pawn counts, each as a white/black pair with opposite signs. Values are
+   * scaled so handcrafted inputs stay on the same order of magnitude as the ±1 piece features.
+   */
   private void addPawnStructureFeatures(Board board, double[] features) {
     boolean[] whitePawnFiles = new boolean[8];
     boolean[] blackPawnFiles = new boolean[8];
@@ -148,19 +136,13 @@ public class NNUEFeatureExtractor {
       }
     }
 
-    // ============
-    // Passed Pawn Features (indices 640-641)
-    // Scaled to [-1, 1] so handcrafted inputs stay on the same order of
-    // magnitude as the ±1 piece features and cannot drown them out.
-    // ============
+    // Passed pawns.
     int whitePassedBonus = calculatePassedPawnBonus(board, true);
     int blackPassedBonus = calculatePassedPawnBonus(board, false);
     features[640] = Math.min(whitePassedBonus / 200.0, 1.0);
     features[641] = -Math.min(blackPassedBonus / 200.0, 1.0);
 
-    // ============
-    // Isolated Pawn Features (indices 642-643)
-    // ============
+    // Isolated pawns.
     boolean whiteHasIsolated = false;
     boolean blackHasIsolated = false;
 
@@ -174,29 +156,21 @@ public class NNUEFeatureExtractor {
     features[642] = whiteHasIsolated ? 1.0 : 0.0;
     features[643] = blackHasIsolated ? -1.0 : 0.0;
 
-    // ============
-    // Connected Pawn Chain Features (indices 644-645)
-    // Both colours must be evaluated INDEPENDENTLY of each other.
-    // ============
+    // Connected pawn chains, evaluated independently per colour.
     boolean whiteHasConnected = hasConnectedPawn(whitePawnFiles);
     boolean blackHasConnected = hasConnectedPawn(blackPawnFiles);
 
     features[644] = whiteHasConnected ? 1.0 : 0.0;
     features[645] = blackHasConnected ? -1.0 : 0.0;
 
-    // ============
-    // Backward Pawn Features (indices 646-647)
-    // Both colours must be evaluated INDEPENDENTLY of each other.
-    // ============
+    // Backward pawns, evaluated independently per colour.
     boolean whiteHasBackward = hasBackwardPawn(whitePawnFiles);
     boolean blackHasBackward = hasBackwardPawn(blackPawnFiles);
 
     features[646] = whiteHasBackward ? 1.0 : 0.0;
     features[647] = blackHasBackward ? -1.0 : 0.0;
 
-    // ============
-    // Pawn Count Per File (indices 648-663)
-    // ============
+    // Pawn counts per file.
     for (int f = 0; f < 8; f++) {
       features[648 + f] = whitePawnCountPerFile[f] / 8.0;
       features[656 + f] = -blackPawnCountPerFile[f] / 8.0;
@@ -204,8 +178,8 @@ public class NNUEFeatureExtractor {
   }
 
   /**
-   * Calculates passed pawn bonus from the given perspective. Positive value from white's
-   * perspective, negative from black's.
+   * Sums a bonus for every passed pawn, larger the further it has advanced. The total is capped so
+   * one wild position cannot dominate the feature.
    */
   private int calculatePassedPawnBonus(Board board, boolean white) {
     int bonus = 0;
@@ -218,6 +192,7 @@ public class NNUEFeatureExtractor {
         if (piece == null || !(piece instanceof Pawn) || piece.isWhite() != white) continue;
 
         boolean isPassed = true;
+        // Scan every square ahead on this file and both neighbouring files for enemy pawns.
         for (int r = row + direction; r >= 0 && r < 8; r += direction) {
           if (isValidPos(r, col)) {
             Piece checking = board.getPiece(new Position(r, col));
@@ -254,19 +229,20 @@ public class NNUEFeatureExtractor {
     return bonus;
   }
 
+  /** Returns whether a row/column pair lies on the board. */
   private boolean isValidPos(int row, int col) {
     return row >= 0 && row < 8 && col >= 0 && col < 8;
   }
 
-  // Pawn count per file already added above
-
-  /** Adds king safety features to the feature vector. */
+  /**
+   * Fills the king safety block: distance between kings, shared colour complex, enemy pieces next
+   * to each king, pawn shield, king mobility and centre control.
+   */
   private void addKingSafetyFeatures(Board board, double[] features) {
     Position whiteKing = board.findKing(true);
     Position blackKing = board.findKing(false);
 
     if (whiteKing == null || blackKing == null) {
-      for (int i = 664; i <= 679; i++) features[i] = 0.0;
       return;
     }
 
@@ -275,41 +251,34 @@ public class NNUEFeatureExtractor {
     int blackKingRow = blackKing.getRow();
     int blackKingCol = blackKing.getColumn();
 
-    // Index 670: King distance (normalized)
+    // Distance between the kings, normalized.
     int manhattanDist =
         Math.abs(whiteKingRow - blackKingRow) + Math.abs(whiteKingCol - blackKingCol);
     features[670] = manhattanDist / 14.0;
 
-    // Index 671: Same color complex (1.0) or opposite color (-1.0)
+    // Same colour complex (+1) or opposite (-1).
     int whiteKingColor = (whiteKingRow + whiteKingCol) & 1;
     int blackKingColor = (blackKingRow + blackKingCol) & 1;
     features[671] = whiteKingColor == blackKingColor ? 1.0 : -1.0;
 
-    // Index 672: White king attackers near king (normalized)
+    // Enemy pieces adjacent to each king.
     features[672] = countAttackersNearKing(board, true, whiteKing) / 8.0;
-
-    // Index 673: Black king attackers (negated from white perspective)
     features[673] = -countAttackersNearKing(board, false, blackKing) / 8.0;
 
-    // Index 674: White king shielded (1.0 if has pawn shield)
+    // Pawn shield in front of each king.
     features[674] = isKingShielded(board, true, whiteKing) ? 1.0 : 0.0;
-
-    // Index 675: Black king shielded (negated)
     features[675] = isKingShielded(board, false, blackKing) ? -1.0 : 0.0;
 
-    // Index 676: White king mobility (normalized)
+    // Safe squares the kings can move to.
     features[676] = calculateKingMobility(board, true, whiteKing) / 8.0;
-
-    // Index 677: Black king mobility (negated)
     features[677] = -calculateKingMobility(board, false, blackKing) / 8.0;
 
-    // Index 678: White king center control (0.0 to 1.0)
+    // Control of the four central squares around each king.
     features[678] = calculateKingCenterControl(board, true) / 4.0;
-
-    // Index 679: Black king center control (negated)
     features[679] = -calculateKingCenterControl(board, false) / 4.0;
   }
 
+  /** Counts enemy pieces standing on the eight squares surrounding a king. */
   private int countAttackersNearKing(Board board, boolean white, Position king) {
     int count = 0;
     int tr = king.getRow();
@@ -326,6 +295,7 @@ public class NNUEFeatureExtractor {
     return count;
   }
 
+  /** Returns whether at least one own pawn stands within three ranks in front of the king. */
   private boolean isKingShielded(Board board, boolean white, Position king) {
     int kr = king.getRow();
     int kc = king.getColumn();
@@ -346,6 +316,7 @@ public class NNUEFeatureExtractor {
     return false;
   }
 
+  /** Counts how many adjacent squares a king could still safely step to. */
   private int calculateKingMobility(Board board, boolean white, Position king) {
     int mobility = 0;
     int tr = king.getRow();
@@ -364,6 +335,7 @@ public class NNUEFeatureExtractor {
     return mobility;
   }
 
+  /** Counts how many central squares a king attacks without being attacked there itself. */
   private double calculateKingCenterControl(Board board, boolean white) {
     Position k = board.findKing(white);
     if (k == null) return 0.0;
@@ -384,74 +356,66 @@ public class NNUEFeatureExtractor {
   }
 
   /**
-   * Returns the colour-flipped mirror of a feature vector: every white piece becomes a black piece
-   * on the rank-mirrored square (row -> 7 - row, files are PRESERVED), colors swap and the side to
-   * move flips. Rank-flip-only is used instead of a full 180-degree rotation because castling is
-   * structurally tied to the e-file; mirroring files as well would move the king off e1/e8 and make
-   * castling impossible in the mirrored position. The rotated position has exactly the same
-   * game-theoretic value from the MOVER's perspective (the white-perspective value flips sign, but
-   * so does who is to move, and the two cancel), which makes it a free label-preserving training
-   * example for mover-perspective outcome labels.
+   * Returns the colour-flipped rank mirror of a feature vector: every white piece becomes a black
+   * piece on the rank-mirrored square (files are preserved), colours swap and the side to move
+   * flips. Rank mirroring is used instead of a full rotation because castling is tied to the
+   * e-file; mirroring files too would move kings off e1/e8 and make castling impossible in the
+   * mirrored position. From the mover's perspective the mirrored position has exactly the same
+   * value, which makes this a free label-preserving training example.
    */
   public static double[] rotated(double[] features) {
     double[] out = new double[INPUT_SIZE];
 
-    // Piece-square block (0-383): same piece type, rank-mirrored square, color flipped.
+    // Piece-square block: same type, rank-mirrored square, flipped colour.
     for (int type = 0; type < 6; type++) {
       for (int sq = 0; sq < 64; sq++) {
         double v = features[type * 64 + sq];
         if (v != 0.0) {
-          int row = sq / 8;
-          int col = sq % 8;
           out[type * 64 + rotSquare(sq)] = -v;
         }
       }
     }
 
-    // King one-hot blocks (384-447 white, 512-575 black) swap blocks.
+    // King one-hot blocks (white 384-447, black 512-575) swap places.
     for (int sq = 0; sq < 64; sq++) {
       if (features[384 + sq] != 0.0) out[512 + rotSquare(sq)] = 1.0;
       if (features[512 + sq] != 0.0) out[384 + rotSquare(sq)] = 1.0;
     }
 
-    // King center bonuses (511 white positive, 639 black negative) swap signs.
+    // King centre bonuses swap signs along with their blocks.
     out[511] = -features[639];
     out[639] = -features[511];
 
-    // Pawn structure pairs (white index is the even one) swap and flip sign.
+    // Pawn structure pairs swap and flip sign.
     swapNegate(features, out, 640, 641); // passed pawns
     swapNegate(features, out, 642, 643); // isolated pawns
     swapNegate(features, out, 644, 645); // connected pawns
     swapNegate(features, out, 646, 647); // backward pawns
 
-    // Pawn count per file (648-655 white, 656-663 black): files are preserved under rank flip.
+    // Per-file pawn counts: files are preserved under the rank flip, so only signs flip.
     for (int f = 0; f < 8; f++) {
       out[656 + f] = -features[648 + f];
       out[648 + f] = -features[656 + f];
     }
 
-    // 664-669 are unused and stay zero.
-
-    // King distance (670): Manhattan distance is invariant under rank flip.
-    // Square-colour parity (671): every square's parity flips, so whether the two kings share a
-    // colour complex does not change.
+    // King distance (670) is invariant under a rank flip; square-colour parity (671) flips for
+    // every square, so whether the kings share a complex does not change either.
     out[670] = features[670];
     out[671] = features[671];
 
-    // King safety pairs (672/673 attackers, 674/675 shield, 676/677 mobility,
-    // 678/679 centre control) swap and flip sign.
-    swapNegate(features, out, 672, 673);
-    swapNegate(features, out, 674, 675);
-    swapNegate(features, out, 676, 677);
-    swapNegate(features, out, 678, 679);
+    // King safety pairs swap and flip sign.
+    swapNegate(features, out, 672, 673); // attackers near king
+    swapNegate(features, out, 674, 675); // pawn shield
+    swapNegate(features, out, 676, 677); // mobility
+    swapNegate(features, out, 678, 679); // centre control
 
-    // Castling rights: white K/Q-side become black K/Q-side respectively (files preserved).
+    // Castling rights swap between colours (files preserved).
     out[680] = -features[682]; // rotated white kingside <- original black kingside
     out[681] = -features[683]; // rotated white queenside <- original black queenside
     out[682] = -features[680]; // rotated black kingside <- original white kingside
     out[683] = -features[681]; // rotated black queenside <- original white queenside
 
-    // En passant availability survives but the side to capture flips.
+    // En passant availability survives but the side able to capture flips.
     out[684] = -features[684];
 
     // Side to move flips.
@@ -460,14 +424,14 @@ public class NNUEFeatureExtractor {
     return out;
   }
 
-  /** Rank-mirrored square index: row -> 7 - row, column unchanged. */
+  /** Returns the rank-mirrored square index: row becomes 7 - row, column unchanged. */
   private static int rotSquare(int squareIndex) {
     int row = squareIndex / 8;
     int col = squareIndex % 8;
     return (7 - row) * 8 + col;
   }
 
-  /** True if any pawn of this colour sits on a file adjacent to another own pawn. */
+  /** True when any own pawn sits on a file adjacent to another own pawn. */
   private static boolean hasConnectedPawn(boolean[] pawnFiles) {
     for (int f = 0; f < 8; f++) {
       if (!pawnFiles[f]) continue;
@@ -476,7 +440,7 @@ public class NNUEFeatureExtractor {
     return false;
   }
 
-  /** True if any pawn of this colour sits on a file with no adjacent own pawns. */
+  /** True when any own pawn sits on a file with no friendly pawn on either neighbouring file. */
   private static boolean hasBackwardPawn(boolean[] pawnFiles) {
     for (int f = 0; f < 8; f++) {
       if (!pawnFiles[f]) continue;
@@ -487,13 +451,13 @@ public class NNUEFeatureExtractor {
     return false;
   }
 
-  /** out[b] = -features[a] and out[a] = -features[b]. */
+  /** Swaps two paired features while flipping their sign: out[b] = -in[a], out[a] = -in[b]. */
   private static void swapNegate(double[] features, double[] out, int a, int b) {
     out[b] = -features[a];
     out[a] = -features[b];
   }
 
-  /** Returns a center bonus for king position (20 for central, less near edges). */
+  /** Returns a centre bonus for a king's square (20 on the centre, plus 10 near the edge). */
   private int getKingCenterBonus(Position king) {
     int row = king.getRow();
     int col = king.getColumn();

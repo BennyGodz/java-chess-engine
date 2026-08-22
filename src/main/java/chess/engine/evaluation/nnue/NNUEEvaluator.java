@@ -5,26 +5,27 @@ import java.io.File;
 import java.io.IOException;
 
 /**
- * Loads trained NNUE weights and exposes evaluation to {@link chess.engine.evaluation.Evaluator}.
+ * Bridges the NNUE network into the engine's evaluation.
  *
- * <p>The network is trained to predict the game outcome from the SIDE TO MOVE's perspective (see
- * {@code GameTrainer}), but {@link chess.engine.evaluation.Evaluator} and {@link
- * chess.engine.search.SearchEngine} work in WHITE-perspective centipawns (they negate for Black
- * themselves). This class performs that conversion; without it every black-to-move leaf node was
- * evaluated with a sign-flipped network output.
+ * <p>The network is trained to predict outcomes from the SIDE TO MOVE's perspective (see
+ * GameTrainer), but the evaluator and search work in WHITE-perspective centipawns and negate for
+ * Black themselves. This class performs that sign conversion.
  */
 public class NNUEEvaluator {
 
+  /** Weight files tried in order, relative to the working directory. */
   private static final String[] WEIGHT_CANDIDATES = {
     "nnue_weights_best.bin", "nnue_weights.bin", "nnue.weights"
   };
 
   private final NNUE nnue;
 
+  /** Creates an evaluator, loading the default weights file if one exists. */
   public NNUEEvaluator() {
     this(loadDefaultWeights());
   }
 
+  /** Creates an evaluator from a specific weights file. */
   public NNUEEvaluator(File weightsFile) {
     try {
       this.nnue = NNUE.load(weightsFile);
@@ -33,17 +34,21 @@ public class NNUEEvaluator {
     }
   }
 
+  /** Creates an evaluator around an already loaded network. */
   public NNUEEvaluator(NNUE nnue) {
     this.nnue = nnue;
   }
 
-  /** Centipawns from White's perspective. */
+  /** Evaluates in centipawns from White's perspective. */
   public int evaluate(Board board) {
     int sideToMoveScore = nnue.evaluate(board);
     return board.isWhiteToMove() ? sideToMoveScore : -sideToMoveScore;
   }
 
-  /** Tries known weight filenames in the project root; falls back to random init. */
+  /**
+   * Tries the known weight filenames in the project root; when none can be loaded, falls back to a
+   * randomly initialized network with a warning.
+   */
   private static NNUE loadDefaultWeights() {
     for (String name : WEIGHT_CANDIDATES) {
       File file = new File(name);
@@ -52,7 +57,7 @@ public class NNUEEvaluator {
         System.out.println("Loaded NNUE weights: " + file.getPath());
         return NNUE.load(file);
       } catch (IOException ignored) {
-        // try next candidate
+        // Try the next candidate.
       }
     }
     System.err.println(

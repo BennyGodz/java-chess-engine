@@ -6,22 +6,26 @@ import chess.board.Position;
 import java.util.ArrayList;
 import java.util.List;
 
+/** The rook: slides any distance along ranks and files. */
 public class Rook extends Piece {
 
   public Rook(boolean white) {
     super(white);
   }
 
+  /** Returns 'R' for White and 'r' for Black. */
   @Override
   public char getSymbol() {
     return white ? 'R' : 'r';
   }
 
+  /** A rook is worth 500 centipawns. */
   @Override
   public int getValue() {
     return 500;
   }
 
+  /** Generates the moves along all four straight directions until blocked. */
   @Override
   public List<Move> generateMoves(Position position, Board board) {
     List<Move> moves = new ArrayList<>();
@@ -34,6 +38,10 @@ public class Rook extends Piece {
     return moves;
   }
 
+  /**
+   * Walks in one direction adding every empty square; stops at the first occupied square, adding a
+   * capture if it holds an enemy (kings are excluded because they can never actually be captured).
+   */
   private void addDirection(
       List<Move> moves, Position start, Board board, int rowStep, int columnStep) {
     int row = start.getRow() + rowStep;

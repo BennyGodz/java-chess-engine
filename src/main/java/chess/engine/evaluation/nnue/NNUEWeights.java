@@ -3,9 +3,10 @@ package chess.engine.evaluation.nnue;
 import java.io.*;
 
 /**
- * Stores the weights used by the NNUE network.
+ * The weights of the NNUE network.
  *
- * Architecture: 769 inputs → 256 hidden → 256 hidden → 128 hidden → 1 output
+ * <p>Architecture: 769 inputs, then hidden layers of 256, 256 and 128 ReLU units, then a single
+ * tanh output. Provides random initialization (He-style) and binary save/load.
  */
 public class NNUEWeights {
 
@@ -23,6 +24,14 @@ public class NNUEWeights {
   public final double[] outputWeights;
   public double outputBias;
 
+  /**
+   * Expected number of non-zero inputs per position (~32 pieces plus flags and structural inputs).
+   * First-layer variance depends on ACTIVE inputs, not on INPUT_SIZE; scaling by the dense fan-in
+   * leaves first-layer pre-activations so small that many ReLU units are born dead.
+   */
+  private static final double EXPECTED_ACTIVE_INPUTS = 40.0;
+
+  /** Creates zero-initialized weights of the fixed architecture. */
   public NNUEWeights() {
     inputWeights = new double[INPUT_SIZE][HIDDEN_SIZE];
     hiddenBias = new double[HIDDEN_SIZE];
@@ -33,20 +42,12 @@ public class NNUEWeights {
     outputWeights = new double[THIRD_HIDDEN_SIZE];
   }
 
-  /**
-   * Expected number of non-zero inputs per position (~32 pieces + kings, flags and structural
-   * inputs). First-layer variance depends on ACTIVE inputs, not on {@link #INPUT_SIZE}; using the
-   * dense fan-in leaves first-layer pre-activations so small that many ReLU units are born dead
-   * and never recover.
-   */
-  private static final double EXPECTED_ACTIVE_INPUTS = 40.0;
-
-  /** Create randomly initialized weights with a fixed seed (deterministic, for fallbacks/tests). */
+  /** Creates randomly initialized weights with a fixed seed (deterministic, for fallbacks/tests). */
   public static NNUEWeights random() {
     return random(12345L);
   }
 
-  /** Create randomly initialized weights with He initialization scaled to input sparsity. */
+  /** Creates randomly initialized weights using He initialization scaled to input sparsity. */
   public static NNUEWeights random(long seed) {
     NNUEWeights weights = new NNUEWeights();
     java.util.Random random = new java.util.Random(seed);
@@ -85,7 +86,7 @@ public class NNUEWeights {
     return weights;
   }
 
-  /** Save weights to a binary file. */
+  /** Writes all weights to a binary file, preceded by the layer sizes as a format check. */
   public void save(File file) throws IOException {
     try (DataOutputStream out =
         new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)))) {
@@ -125,7 +126,7 @@ public class NNUEWeights {
     }
   }
 
-  /** Load weights from a binary file. */
+  /** Reads weights written by {@link #save(File)}, verifying the architecture matches. */
   public static NNUEWeights load(File file) throws IOException {
     try (DataInputStream in =
         new DataInputStream(new BufferedInputStream(new FileInputStream(file)))) {

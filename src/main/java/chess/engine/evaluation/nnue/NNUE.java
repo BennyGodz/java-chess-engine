@@ -4,14 +4,22 @@ import chess.board.Board;
 import java.io.File;
 import java.io.IOException;
 
+/**
+ * Runs a trained neural network over a board position.
+ *
+ * <p>The network is trained to predict the game outcome from the side to move's perspective; this
+ * class converts that output to White-perspective centipawns, which is what the rest of the engine
+ * expects.
+ */
 public class NNUE {
 
+  /** Output of tanh() in [-1, 1] scaled up to centipawns. */
   private static final int OUTPUT_SCALE = 400;
 
   /**
-   * Reusable per-thread activation buffers. evaluate() runs at EVERY search leaf; allocating
-   * ~700 doubles there showed up as pure GC pressure. ThreadLocal keeps instances safe when
-   * several engines run in parallel threads.
+   * Reusable per-thread activation buffers. evaluate() runs at every search leaf, and allocating
+   * several hundred doubles there shows up as pure GC pressure. ThreadLocal keeps instances safe
+   * when engines run in parallel threads.
    */
   private final ThreadLocal<double[][]> scratch =
       ThreadLocal.withInitial(
@@ -30,6 +38,10 @@ public class NNUE {
     extractor = new NNUEFeatureExtractor();
   }
 
+  /**
+   * Evaluates the board through the network: features are extracted, pushed through three ReLU
+   * hidden layers, squashed by tanh and scaled to centipawns from the side to move's perspective.
+   */
   public int evaluate(Board board) {
     double[] features = extractor.extract(board);
     double[][] buffers = scratch.get();
@@ -73,18 +85,22 @@ public class NNUE {
     return (int) Math.round(Math.tanh(output) * OUTPUT_SCALE);
   }
 
+  /** Rectified linear unit used on all hidden layers. */
   private static double relu(double x) {
     return Math.max(0.0, x);
   }
 
+  /** Returns the network's weights, e.g. for training or copying. */
   public NNUEWeights getWeights() {
     return weights;
   }
 
+  /** Writes the current weights to a binary file. */
   public void save(File file) throws IOException {
     weights.save(file);
   }
 
+  /** Loads a network from a binary weights file. */
   public static NNUE load(File file) throws IOException {
     return new NNUE(NNUEWeights.load(file));
   }

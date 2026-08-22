@@ -7,8 +7,18 @@ import chess.pieces.Piece;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Turns pseudo legal piece moves into legal moves.
+ *
+ * <p>A generated move is played on a copy of the board and kept only if it does not leave the
+ * mover's own king in check.
+ */
 public class MoveGenerator {
 
+  /**
+   * Generates every legal move of the piece on {@code position}: each candidate is verified by
+   * playing it on a board copy and rejecting the ones that leave the mover in check.
+   */
   public List<Move> generateLegalMoves(Piece piece, Position position, Board board) {
     List<Move> legalMoves = new ArrayList<>();
 

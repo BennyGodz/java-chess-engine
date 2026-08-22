@@ -9,9 +9,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Complete chess position and rules implementation.
+ * The chess board: piece placement, move execution and every game-end rule.
  *
- * <p>Coordinates use row 0..7 for ranks 8..1 and column 0..7 for files a..h.
+ * <p>Coordinates use row 0..7 for ranks 8..1 and column 0..7 for files a..h. The board also tracks
+ * castling rights, the en passant target, the halfmove clock, the fullmove number, repetition
+ * counts and a Zobrist hash of the position.
  */
 public class Board {
 
@@ -26,19 +28,19 @@ public class Board {
 
   private Position enPassantTarget = null;
 
-  /** Number of half-moves since the last pawn move or capture. */
+  /** Half-moves since the last pawn move or capture; used for the 50/75-move rules. */
   private int halfmoveClock = 0;
 
-  /** Fullmove number from FEN/PGN semantics. Starts at 1 and increments after Black moves. */
+  /** Fullmove number; starts at 1 and increments after Black moves. */
   private int fullmoveNumber = 1;
 
-/** Position counts used for threefold/fivefold repetition. */
+  /** How often each position has occurred; used for repetition draws. */
   private final Map<String, Integer> repetitionCounts = new HashMap<>();
 
-  // Zobrist hashing key for position identification
+  /** Zobrist hash of the current position. */
   private long zobristKey;
 
-  // Static Zobrist key tables (initialized in static block below)
+  // Random but fixed Zobrist keys, one per piece type/square, castling right set and en passant square.
   private static final long[][] PIECE_KEYS;
   private static final long[] CASTLING_KEYS;
   private static final long[] EN_PASSANT_KEYS;
@@ -63,140 +65,63 @@ public class Board {
     SIDE_TO_MOVE_KEY = rand.nextLong();
   }
 
-public Board() {
+  /** Creates a board in the standard starting position. */
+  public Board() {
     board = new Piece[8][8];
     setupStartingPosition();
     repetitionCounts.put(getPositionKey(), 1);
     this.zobristKey = initZobristKey();
   }
 
+  /**
+   * Computes the Zobrist hash for the current position by XOR-ing together the keys of every
+   * piece, the castling rights, the en passant square and the side to move.
+   */
   private long initZobristKey() {
     long key = 0;
-    // XOR piece keys
     for (int row = 0; row < 8; row++) {
       for (int column = 0; column < 8; column++) {
         Piece piece = board[row][column];
-        if (piece != null) {
-          int pieceType = piece.isWhite() ? piece.getSymbol() - 'A' + 6 : piece.getSymbol() - 'a';
-          // Map: Pawn=0, Knight=1, Bishop=2, Rook=3, Queen=4, King=5
-          if (piece instanceof Pawn) pieceType = 0;
-          else if (piece instanceof Knight) pieceType = 1;
-          else if (piece instanceof Bishop) pieceType = 2;
-          else if (piece instanceof Rook) pieceType = 3;
-          else if (piece instanceof Queen) pieceType = 4;
-          else if (piece instanceof King) pieceType = 5;
-          key ^= Board.PIECE_KEYS[pieceType][row * 8 + column];
+        if (piece == null) {
+          continue;
         }
+        int pieceType = pieceTypeIndex(piece);
+        key ^= Board.PIECE_KEYS[pieceType][row * 8 + column];
       }
     }
-    // XOR castling rights
     int castling = 0;
     if (whiteKingsideCastle) castling |= 8;
     if (whiteQueensideCastle) castling |= 4;
     if (blackKingsideCastle) castling |= 2;
     if (blackQueensideCastle) castling |= 1;
     key ^= Board.CASTLING_KEYS[castling];
-    // XOR en passant key
     if (enPassantTarget != null) {
       key ^= Board.EN_PASSANT_KEYS[enPassantTarget.getRow() * 8 + enPassantTarget.getColumn()];
     }
-    // XOR side to move key
     key ^= (whiteToMove ? 0 : Board.SIDE_TO_MOVE_KEY);
     return key;
   }
 
-  /** Compute bishop attacks for given occupancy bitboard. */
-  private long computeBishopAttacks(int square, long occupancy) {
-    long result = 0;
-    int row = square / 8;
-    int col = square % 8;
-
-    // Four diagonal directions
-    // Up-Right
-    int r = row - 1;
-    int c = col + 1;
-    while (r >= 0 && c < 8) {
-      result |= 1L << (r * 8 + c);
-      if ((occupancy & (1L << (r * 8 + c))) != 0) break;
-      r--;
-      c++;
-    }
-    // Up-Left
-    r = row - 1;
-    c = col - 1;
-    while (r >= 0 && c >= 0) {
-      result |= 1L << (r * 8 + c);
-      if ((occupancy & (1L << (r * 8 + c))) != 0) break;
-      r--;
-      c--;
-    }
-    // Down-Right
-    r = row + 1;
-    c = col + 1;
-    while (r < 8 && c < 8) {
-      result |= 1L << (r * 8 + c);
-      if ((occupancy & (1L << (r * 8 + c))) != 0) break;
-      r++;
-      c++;
-    }
-    // Down-Left
-    r = row + 1;
-    c = col - 1;
-    while (r < 8 && c >= 0) {
-      result |= 1L << (r * 8 + c);
-      if ((occupancy & (1L << (r * 8 + c))) != 0) break;
-      r++;
-      c--;
-    }
-    return result;
+  /** Maps a piece to its Zobrist table index: Pawn=0, Knight=1, Bishop=2, Rook=3, Queen=4, King=5. */
+  private static int pieceTypeIndex(Piece piece) {
+    if (piece instanceof Pawn) return 0;
+    if (piece instanceof Knight) return 1;
+    if (piece instanceof Bishop) return 2;
+    if (piece instanceof Rook) return 3;
+    if (piece instanceof Queen) return 4;
+    return 5;
   }
 
-  /** Compute rook attacks for given occupancy bitboard. */
-  private long computeRookAttacks(int square, long occupancy) {
-    long result = 0;
-    int row = square / 8;
-    int col = square % 8;
-
-    // Four orthogonal directions
-    // Up
-    int r = row - 1;
-    while (r >= 0) {
-      result |= 1L << (r * 8 + col);
-      if ((occupancy & (1L << (r * 8 + col))) != 0) break;
-      r--;
-    }
-    // Down
-    r = row + 1;
-    while (r < 8) {
-      result |= 1L << (r * 8 + col);
-      if ((occupancy & (1L << (r * 8 + col))) != 0) break;
-      r++;
-    }
-    // Left
-    int c = col - 1;
-    while (c >= 0) {
-      result |= 1L << (row * 8 + c);
-      if ((occupancy & (1L << (row * 8 + c))) != 0) break;
-      c--;
-    }
-    // Right
-    c = col + 1;
-    while (c < 8) {
-      result |= 1L << (row * 8 + c);
-      if ((occupancy & (1L << (row * 8 + c))) != 0) break;
-      c++;
-    }
-    return result;
-  }
-
-  /** Deep copy used for move simulation. History is copied so state queries remain consistent. */
+  /**
+   * Deep copy of another board, used to simulate moves without touching the original. History is
+   * copied so state queries on the copy stay consistent.
+   */
   public Board(Board other) {
     board = new Piece[8][8];
 
     for (int row = 0; row < 8; row++) {
       for (int column = 0; column < 8; column++) {
-        Piece piece = other.board[row][column];
-        board[row][column] = copyPiece(piece);
+        board[row][column] = copyPiece(other.board[row][column]);
       }
     }
 
@@ -216,6 +141,7 @@ public Board() {
     repetitionCounts.putAll(other.repetitionCounts);
   }
 
+  /** Creates a fresh instance of the given piece's exact type. */
   private Piece copyPiece(Piece piece) {
     if (piece instanceof Pawn) return new Pawn(piece.isWhite());
     if (piece instanceof Knight) return new Knight(piece.isWhite());
@@ -226,6 +152,7 @@ public Board() {
     return null;
   }
 
+  /** Places all 32 pieces on their starting squares. */
   private void setupStartingPosition() {
     board[0][0] = new Rook(false);
     board[0][1] = new Knight(false);
@@ -251,57 +178,73 @@ public Board() {
     board[7][7] = new Rook(true);
   }
 
+  /** Returns whether it is White's turn. */
   public boolean isWhiteToMove() {
     return whiteToMove;
   }
 
+  /** Returns the number of half-moves since the last pawn move or capture. */
   public int getHalfmoveClock() {
     return halfmoveClock;
   }
 
+  /** Returns the current fullmove number. */
   public int getFullmoveNumber() {
     return fullmoveNumber;
   }
 
+  /** Returns the piece on a square, or null when the square is empty. */
   public Piece getPiece(Position position) {
     return board[position.getRow()][position.getColumn()];
   }
 
+  /** Places a piece on a square, replacing whatever was there. */
   public void setPiece(Position position, Piece piece) {
     board[position.getRow()][position.getColumn()] = piece;
   }
 
+  /** Returns whether the position is on the board and empty. */
   public boolean isEmpty(Position position) {
     return getPiece(position) == null;
   }
 
+  /** Returns whether an enemy piece (from {@code white}'s point of view) stands on the square. */
   public boolean isEnemyPiece(Position position, boolean white) {
     Piece piece = getPiece(position);
     return piece != null && piece.isWhite() != white;
   }
 
+  /** Returns whether a row/column pair lies on the board. */
   public boolean isValid(int row, int column) {
     return row >= 0 && row < 8 && column >= 0 && column < 8;
   }
 
+  /** Returns whether the square is on the board and empty. */
   public boolean isEmpty(int row, int column) {
     return isValid(row, column) && board[row][column] == null;
   }
 
+  /** Returns whether the square holds an enemy piece from {@code white}'s point of view. */
   public boolean hasEnemyPiece(int row, int column, boolean white) {
     return isValid(row, column)
         && board[row][column] != null
         && board[row][column].isWhite() != white;
   }
 
+  /** Returns whether the square is the current en passant target. */
   public boolean isEnPassantTarget(Position position) {
     return enPassantTarget != null && enPassantTarget.equals(position);
   }
 
+  /** Returns the current en passant target square, or null when there is none. */
   public Position getEnPassantTarget() {
     return enPassantTarget;
   }
 
+  /**
+   * Returns whether the side may castle kingside: rights intact, king and rook on their home
+   * squares, squares between them empty and none of the king's path attacked.
+   */
   public boolean canCastleKingside(boolean white) {
     int row = white ? 7 : 0;
     boolean rights = white ? whiteKingsideCastle : blackKingsideCastle;
@@ -319,6 +262,10 @@ public Board() {
         && !isSquareAttacked(new Position(row, 6), !white);
   }
 
+  /**
+   * Returns whether the side may castle queenside: rights intact, king and rook on their home
+   * squares, squares between them empty and none of the king's path attacked.
+   */
   public boolean canCastleQueenside(boolean white) {
     int row = white ? 7 : 0;
     boolean rights = white ? whiteQueensideCastle : blackQueensideCastle;
@@ -338,6 +285,7 @@ public Board() {
         && !isSquareAttacked(new Position(row, 2), !white);
   }
 
+  /** Returns the square of the given side's king, or null if it is missing. */
   public Position findKing(boolean white) {
     for (int row = 0; row < 8; row++) {
       for (int column = 0; column < 8; column++) {
@@ -350,12 +298,16 @@ public Board() {
     return null;
   }
 
-  /** Returns whether a square is attacked by the requested side, without generating legal moves. */
+  /**
+   * Returns whether a square is attacked by any piece of the given colour. Checks pawns, knights,
+   * kings and sliding pieces directly instead of generating legal moves, which makes it fast
+   * enough for check detection during search.
+   */
   public boolean isSquareAttacked(Position square, boolean byWhite) {
     int targetRow = square.getRow();
     int targetColumn = square.getColumn();
 
-    // Pawns.
+    // Pawns attack diagonally "backwards" relative to their movement direction.
     int pawnRow = targetRow + (byWhite ? 1 : -1);
     if (isValid(pawnRow, targetColumn - 1)) {
       Piece piece = board[pawnRow][targetColumn - 1];
@@ -379,7 +331,7 @@ public Board() {
       if (piece instanceof Knight && piece.isWhite() == byWhite) return true;
     }
 
-    // Kings.
+    // Adjacent kings.
     for (int rowOffset = -1; rowOffset <= 1; rowOffset++) {
       for (int columnOffset = -1; columnOffset <= 1; columnOffset++) {
         if (rowOffset == 0 && columnOffset == 0) continue;
@@ -391,7 +343,7 @@ public Board() {
       }
     }
 
-    // Rooks / queens.
+    // Rooks and queens along ranks/files, then bishops and queens along diagonals.
     if (lineAttacked(targetRow, targetColumn, byWhite, -1, 0, Rook.class)
         || lineAttacked(targetRow, targetColumn, byWhite, 1, 0, Rook.class)
         || lineAttacked(targetRow, targetColumn, byWhite, 0, -1, Rook.class)
@@ -399,13 +351,16 @@ public Board() {
       return true;
     }
 
-    // Bishops / queens.
     return lineAttacked(targetRow, targetColumn, byWhite, -1, -1, Bishop.class)
         || lineAttacked(targetRow, targetColumn, byWhite, -1, 1, Bishop.class)
         || lineAttacked(targetRow, targetColumn, byWhite, 1, -1, Bishop.class)
         || lineAttacked(targetRow, targetColumn, byWhite, 1, 1, Bishop.class);
   }
 
+  /**
+   * Walks outward from a square in one direction until a piece is found; returns whether that
+   * first piece is an enemy slider able to attack along this direction (a rook-type or queen).
+   */
   private boolean lineAttacked(
       int targetRow,
       int targetColumn,
@@ -428,11 +383,13 @@ public Board() {
     return false;
   }
 
+  /** Returns whether the given side's king is in check. */
   public boolean isInCheck(boolean white) {
     Position king = findKing(white);
     return king != null && isSquareAttacked(king, !white);
   }
 
+  /** Generates every legal move for the given side across the whole board. */
   public List<Move> getLegalMoves(boolean white) {
     List<Move> legalMoves = new ArrayList<>();
     MoveGenerator generator = new MoveGenerator();
@@ -450,6 +407,7 @@ public Board() {
     return legalMoves;
   }
 
+  /** Generates the legal moves of the piece standing on one specific square. */
   public List<Move> getLegalMoves(Position position) {
     Piece piece = getPiece(position);
     if (piece == null) return Collections.emptyList();
@@ -457,7 +415,10 @@ public Board() {
   }
 
   /**
-   * Legacy coordinate API. If a pawn is promoted, caller should use playMove with a specific Move.
+   * Legacy coordinate API: plays a non-promotion move chosen only by its start and end squares.
+   * For promotions callers must use {@link #playMove(Move)} with a specific Move.
+   *
+   * @return whether a matching legal move existed and was played
    */
   public boolean movePiece(Position start, Position end) {
     Piece piece = getPiece(start);
@@ -478,6 +439,10 @@ public Board() {
     return true;
   }
 
+  /**
+   * Finds the legal move from start to end, optionally restricted to one promotion choice ('Q',
+   * 'R', 'B' or 'N'). Returns null when no such legal move exists.
+   */
   public Move findLegalMove(Position start, Position end, char promotionChoice) {
     for (Move move : getLegalMoves(start)) {
       if (!move.getEnd().equals(end)) continue;
@@ -492,7 +457,10 @@ public Board() {
     return null;
   }
 
-  /** Play a legal move and update counters, rights, side-to-move and repetition state. */
+  /**
+   * Plays a legal move and updates all bookkeeping: halfmove clock, fullmove number, side to move,
+   * repetition counts and the Zobrist key.
+   */
   public void playMove(Move move) {
     if (move == null) throw new IllegalArgumentException("Move cannot be null.");
 
@@ -501,10 +469,10 @@ public Board() {
       throw new IllegalArgumentException("That piece cannot move now.");
     }
 
-    boolean capture = isCapture(move, movingPiece);
+    boolean capture = isCapture(move);
     makeMove(move);
 
-    // 50-move clock resets after any pawn move or capture.
+    // The 50-move clock resets after any pawn move or capture.
     if (movingPiece instanceof Pawn || capture) halfmoveClock = 0;
     else halfmoveClock++;
 
@@ -515,16 +483,22 @@ public Board() {
     this.zobristKey = initZobristKey();
   }
 
-  /** Returns the current Zobrist key for the position. */
+  /** Returns the Zobrist hash of the current position. */
   public long getZobristKey() {
     return zobristKey;
   }
 
-  private boolean isCapture(Move move, Piece movingPiece) {
+  /** Returns whether the move captures something (normally or en passant). */
+  private boolean isCapture(Move move) {
     return move.isEnPassant() || getPiece(move.getEnd()) != null;
   }
 
-  /** Mutates only the board position. Used internally for simulation and by playMove. */
+  /**
+   * Applies a move to the piece placement only: moves the piece, handles captures, en passant,
+   * castling rook moves and promotions, then updates castling rights and the en passant target.
+   * Counters and repetition state are handled by {@link #playMove}; this method alone is used for
+   * simulation inside search.
+   */
   public void makeMove(Move move) {
     Position start = move.getStart();
     Position end = move.getEnd();
@@ -547,6 +521,7 @@ public Board() {
       int row = start.getRow();
       setPiece(end, movingPiece);
 
+      // Move the rook to its castled square as well.
       if (end.getColumn() == 6) {
         Piece rook = getPiece(new Position(row, 7));
         setPiece(new Position(row, 7), null);
@@ -562,6 +537,7 @@ public Board() {
 
     updateCastlingRightsAfterMove(start, movingPiece);
 
+    // A double pawn push sets the en passant target; anything else clears it.
     if (movingPiece instanceof Pawn && Math.abs(end.getRow() - start.getRow()) == 2) {
       enPassantTarget = new Position((start.getRow() + end.getRow()) / 2, start.getColumn());
     } else {
@@ -569,6 +545,7 @@ public Board() {
     }
   }
 
+  /** Revokes castling rights when the king moves or the matching rook moves away. */
   private void updateCastlingRightsAfterMove(Position start, Piece movingPiece) {
     if (movingPiece instanceof King) {
       if (movingPiece.isWhite()) {
@@ -593,8 +570,8 @@ public Board() {
   }
 
   /**
-   * Creates a new board, applies one legal move, and switches the side to move. Used by the search
-   * engine so the current Board itself is never mutated.
+   * Creates a copy of this board with the move already played. Used by the search engine so the
+   * searched Board itself is never mutated.
    */
   public Board copyAndPlayMoveForSearch(Move move) {
     Board copy = new Board(this);
@@ -602,6 +579,7 @@ public Board() {
     return copy;
   }
 
+  /** Removes the castling right of a rook that has been captured on its home square. */
   private void removeCastlingRightForRookCapture(Position square, boolean rookWhite) {
     if (rookWhite) {
       if (square.equals(new Position(7, 0))) whiteQueensideCastle = false;
@@ -612,40 +590,45 @@ public Board() {
     }
   }
 
+  /** Returns whether the given side is checkmated (in check with no legal moves). */
   public boolean isCheckmate(boolean white) {
     return isInCheck(white) && getLegalMoves(white).isEmpty();
   }
 
+  /** Returns whether the given side is stalemated (not in check with no legal moves). */
   public boolean isStalemate(boolean white) {
     return !isInCheck(white) && getLegalMoves(white).isEmpty();
   }
 
-  /** Claimable by a player under the 50-move rule. */
+  /** Returns whether the 50-move draw can be claimed by a player. */
   public boolean isFiftyMoveRule() {
     return halfmoveClock >= 100;
   }
 
-  /** Automatic seventy-five-move draw under FIDE rules. */
+  /** Returns whether the automatic seventy-five-move draw applies. */
   public boolean isSeventyFiveMoveRule() {
     return halfmoveClock >= 150;
   }
 
-  /** Number of times the exact current position has occurred. */
+  /** Returns how many times the exact current position has occurred. */
   public int getCurrentPositionRepetitionCount() {
     return repetitionCounts.getOrDefault(getPositionKey(), 0);
   }
 
-  /** Claimable after the same position has occurred at least three times. */
+  /** Returns whether the same position has occurred at least three times (claimable draw). */
   public boolean isThreefoldRepetition() {
     return getCurrentPositionRepetitionCount() >= 3;
   }
 
-  /** Automatic draw after the same position occurs at least five times. */
+  /** Returns whether the same position has occurred at least five times (automatic draw). */
   public boolean isFivefoldRepetition() {
     return getCurrentPositionRepetitionCount() >= 5;
   }
 
-  /** Dead position detection for common insufficient-material cases. */
+  /**
+   * Detects dead positions where neither side can possibly mate: bare kings, king plus a single
+   * minor piece versus a king, and opposite bishops on the same colour complex.
+   */
   public boolean isInsufficientMaterial() {
     List<Piece> pieces = new ArrayList<>();
     for (int row = 0; row < 8; row++) {
@@ -658,7 +641,7 @@ public Board() {
     // Kings only.
     if (pieces.size() == 2) return true;
 
-    // King + one bishop/knight vs king.
+    // King plus one bishop or knight versus king.
     if (pieces.size() == 3) {
       for (Piece p : pieces) {
         if (p instanceof Bishop || p instanceof Knight) return true;
@@ -666,7 +649,7 @@ public Board() {
       return false;
     }
 
-    // King + bishop vs king + bishop, where bishops stay on the same color.
+    // King plus bishop versus king plus bishop, with both bishops on the same colour.
     if (pieces.size() == 4) {
       boolean allMinors = true;
       int whiteBishops = 0;
@@ -704,7 +687,10 @@ public Board() {
     return false;
   }
 
-  /** Returns a human-readable status. Game-ending automatic draws are prioritized first. */
+  /**
+   * Returns a human-readable description of the game state. Automatic game-ending conditions are
+   * reported before claimable draws and ordinary turn information.
+   */
   public String getGameStatus() {
     boolean side = whiteToMove;
 
@@ -721,18 +707,23 @@ public Board() {
     return turn;
   }
 
-  /** SAN formatter. It calculates disambiguation from all other LEGAL moves by same piece type. */
+  /**
+   * Formats a move in Standard Algebraic Notation, e.g. "Nbd2", "exd5", "O-O", "e8=Q+", including
+   * disambiguation derived from all other legal moves of the same piece type, and check/mate
+   * suffixes verified on a copy of the board.
+   */
   public String formatMove(Move move) {
     Piece piece = getPiece(move.getStart());
     if (piece == null) return move.toString();
 
-    boolean capture = isCapture(move, piece);
+    boolean capture = isCapture(move);
     StringBuilder notation = new StringBuilder();
 
     if (move.isCastling()) {
       notation.append(move.getEnd().getColumn() == 6 ? "O-O" : "O-O-O");
     } else {
       if (piece instanceof Pawn) {
+        // Pawns are named only by file, and only when capturing.
         if (capture) notation.append((char) ('a' + move.getStart().getColumn()));
       } else {
         notation.append(piece.getNotationSymbol());
@@ -748,6 +739,7 @@ public Board() {
       }
     }
 
+    // Verify check/mate status on a copy so the real board stays untouched.
     Board copy = new Board(this);
     copy.makeMove(move);
     boolean opponent = !piece.isWhite();
@@ -758,8 +750,14 @@ public Board() {
     return notation.toString();
   }
 
+  /** The file/rank letters used to disambiguate otherwise identical SAN moves. */
   private record Disambiguation(String file, String rank) {}
 
+  /**
+   * Works out which disambiguation ("Nb d2" style) a move needs by checking whether another piece
+   * of the same type could legally reach the same square, and whether those alternatives share the
+   * mover's file, rank or both.
+   */
   private Disambiguation calculateDisambiguation(Move move, Piece movingPiece) {
     boolean sameFileCanMove = false;
     boolean sameRankCanMove = false;
@@ -779,22 +777,22 @@ public Board() {
 
     if (!anotherCanMove) return new Disambiguation("", "");
 
-    // SAN: use file if files alone distinguish; otherwise use rank.
+    // Prefer the file when it alone distinguishes the moves; fall back to rank, then both.
     if (!sameFileCanMove) {
       return new Disambiguation(String.valueOf((char) ('a' + move.getStart().getColumn())), "");
     }
     if (!sameRankCanMove) {
       return new Disambiguation("", String.valueOf(8 - move.getStart().getRow()));
     }
-    // If both file and rank collide conceptually, both are required.
     return new Disambiguation(
         String.valueOf((char) ('a' + move.getStart().getColumn())),
         String.valueOf(8 - move.getStart().getRow()));
   }
 
   /**
-   * Position key for repetition. The en-passant field is included only when an actual legal
-   * en-passant capture is possible, matching FIDE position identity.
+   * Builds a unique string identifying the position for repetition purposes: piece placement, side
+   * to move, castling rights and the en passant square. Following FIDE rules, the en passant field
+   * counts only when an actual legal en passant capture exists.
    */
   public String getPositionKey() {
     StringBuilder key = new StringBuilder();
@@ -844,6 +842,11 @@ public Board() {
     return key.toString();
   }
 
+  /**
+   * Returns the en passant target only when some pawn of the side to move can actually capture en
+   * passant right now; otherwise returns null so trivially unexploitable targets do not break
+   * repetition detection.
+   */
   private Position getRepetitionEnPassantTarget() {
     if (enPassantTarget == null) return null;
 
@@ -867,6 +870,10 @@ public Board() {
     return null;
   }
 
+  /**
+   * Plays a "null move": only the side to move flips. Used by the search engine for null-move
+   * pruning; never a real chess move.
+   */
   public void makeNullMove() {
     if (!whiteToMove) fullmoveNumber++;
     whiteToMove = !whiteToMove;
@@ -876,6 +883,7 @@ public Board() {
     this.zobristKey = initZobristKey();
   }
 
+  /** Serialises the position as a FEN string. */
   public String toFEN() {
     StringBuilder fen = new StringBuilder();
     for (int row = 0; row < 8; row++) {
@@ -923,6 +931,10 @@ public Board() {
     return fen.toString();
   }
 
+  /**
+   * Replaces the current state with the position described by a FEN string. Repetition tracking is
+   * reset because nothing is known about earlier occurrences of the position.
+   */
   public void loadFEN(String fen) {
 
     String[] parts = fen.trim().split("\\s+");
@@ -931,52 +943,56 @@ public Board() {
       throw new IllegalArgumentException("Invalid FEN: " + fen);
     }
 
-    /*
-     * Clear board.
-     */
+    clearBoard();
+
+    parseFenPiecePlacement(parts[0]);
+
+    whiteToMove = parts[1].equals("w");
+
+    whiteKingsideCastle = parts[2].contains("K");
+    whiteQueensideCastle = parts[2].contains("Q");
+    blackKingsideCastle = parts[2].contains("k");
+    blackQueensideCastle = parts[2].contains("q");
+
+    if (parts[3].equals("-")) {
+      enPassantTarget = null;
+    } else {
+      enPassantTarget = parseSquare(parts[3]);
+    }
+
+    halfmoveClock = parts.length >= 5 ? Integer.parseInt(parts[4]) : 0;
+    fullmoveNumber = parts.length >= 6 ? Integer.parseInt(parts[5]) : 1;
+
+    repetitionCounts.clear();
+    repetitionCounts.put(getPositionKey(), 1);
+    this.zobristKey = initZobristKey();
+  }
+
+  /** Empties every square of the board. */
+  private void clearBoard() {
     for (int row = 0; row < 8; row++) {
       for (int column = 0; column < 8; column++) {
         board[row][column] = null;
       }
     }
+  }
 
-    /*
-     * Piece placement.
-     */
-    String[] ranks = parts[0].split("/");
+  /** Reads the piece-placement field of a FEN string onto the board. */
+  private void parseFenPiecePlacement(String placement) {
+    String[] ranks = placement.split("/");
 
     if (ranks.length != 8) {
-      throw new IllegalArgumentException("Invalid FEN board: " + parts[0]);
+      throw new IllegalArgumentException("Invalid FEN board: " + placement);
     }
 
     for (int row = 0; row < 8; row++) {
-
       int column = 0;
 
       for (char symbol : ranks[row].toCharArray()) {
-
         if (Character.isDigit(symbol)) {
-
           column += Character.getNumericValue(symbol);
-
         } else {
-
-          boolean white = Character.isUpperCase(symbol);
-
-          Piece piece;
-
-          switch (Character.toLowerCase(symbol)) {
-            case 'p' -> piece = new Pawn(white);
-            case 'n' -> piece = new Knight(white);
-            case 'b' -> piece = new Bishop(white);
-            case 'r' -> piece = new Rook(white);
-            case 'q' -> piece = new Queen(white);
-            case 'k' -> piece = new King(white);
-
-            default -> throw new IllegalArgumentException("Invalid FEN piece: " + symbol);
-          }
-
-          board[row][column] = piece;
+          board[row][column] = createPieceFromSymbol(symbol);
           column++;
         }
       }
@@ -985,67 +1001,37 @@ public Board() {
         throw new IllegalArgumentException("Invalid FEN rank: " + ranks[row]);
       }
     }
-
-    /*
-     * Side to move.
-     */
-    whiteToMove = parts[1].equals("w");
-
-    /*
-     * Castling rights.
-     */
-    whiteKingsideCastle = parts[2].contains("K");
-
-    whiteQueensideCastle = parts[2].contains("Q");
-
-    blackKingsideCastle = parts[2].contains("k");
-
-    blackQueensideCastle = parts[2].contains("q");
-
-    /*
-     * En passant.
-     */
-    if (parts[3].equals("-")) {
-
-      enPassantTarget = null;
-
-    } else {
-
-      String square = parts[3];
-
-      int column = square.charAt(0) - 'a';
-
-      int row = 8 - Character.getNumericValue(square.charAt(1));
-
-      enPassantTarget = new Position(row, column);
-    }
-
-    /*
-     * Halfmove clock.
-     */
-    if (parts.length >= 5) {
-      halfmoveClock = Integer.parseInt(parts[4]);
-    } else {
-      halfmoveClock = 0;
-    }
-
-    /*
-     * Fullmove number.
-     */
-    if (parts.length >= 6) {
-      fullmoveNumber = Integer.parseInt(parts[5]);
-    } else {
-      fullmoveNumber = 1;
-    }
-
-    /*
-     * Reset repetition tracking.
-     */
-    repetitionCounts.clear();
-    repetitionCounts.put(getPositionKey(), 1);
-    this.zobristKey = initZobristKey();
   }
 
+  /** Converts a single FEN piece letter into a fresh piece instance. */
+  private static Piece createPieceFromSymbol(char symbol) {
+    boolean white = Character.isUpperCase(symbol);
+    switch (Character.toLowerCase(symbol)) {
+      case 'p':
+        return new Pawn(white);
+      case 'n':
+        return new Knight(white);
+      case 'b':
+        return new Bishop(white);
+      case 'r':
+        return new Rook(white);
+      case 'q':
+        return new Queen(white);
+      case 'k':
+        return new King(white);
+      default:
+        throw new IllegalArgumentException("Invalid FEN piece: " + symbol);
+    }
+  }
+
+  /** Converts algebraic coordinates like "e4" into a Position. */
+  private static Position parseSquare(String square) {
+    int column = square.charAt(0) - 'a';
+    int row = 8 - Character.getNumericValue(square.charAt(1));
+    return new Position(row, column);
+  }
+
+  /** Prints the board to the console from the perspective of the given player. */
   public void printBoard(boolean playerIsWhite) {
     System.out.println();
     if (playerIsWhite) printWhiteOrientation();
@@ -1053,6 +1039,7 @@ public Board() {
     System.out.println();
   }
 
+  /** Prints the board with White at the bottom. */
   private void printWhiteOrientation() {
     System.out.println("    a   b   c   d   e   f   g   h");
     System.out.println("  +---+---+---+---+---+---+---+---+");
@@ -1065,6 +1052,7 @@ public Board() {
     System.out.println("    a   b   c   d   e   f   g   h");
   }
 
+  /** Prints the board with Black at the bottom. */
   private void printBlackOrientation() {
     System.out.println("    h   g   f   e   d   c   b   a");
     System.out.println("  +---+---+---+---+---+---+---+---+");
@@ -1077,6 +1065,7 @@ public Board() {
     System.out.println("    h   g   f   e   d   c   b   a");
   }
 
+  /** Prints one square followed by its cell border. */
   private void printSquare(int row, int column) {
     if (board[row][column] == null) System.out.print("  | ");
     else System.out.print(board[row][column].getSymbol() + " | ");

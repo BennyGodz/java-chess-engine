@@ -6,22 +6,26 @@ import chess.board.Position;
 import java.util.ArrayList;
 import java.util.List;
 
+/** The bishop: slides any distance along the four diagonals. */
 public class Bishop extends Piece {
 
   public Bishop(boolean white) {
     super(white);
   }
 
+  /** Returns 'B' for White and 'b' for Black. */
   @Override
   public char getSymbol() {
     return white ? 'B' : 'b';
   }
 
+  /** A bishop is worth 330 centipawns. */
   @Override
   public int getValue() {
     return 330;
   }
 
+  /** Generates the moves along all four diagonal directions until blocked. */
   @Override
   public List<Move> generateMoves(Position position, Board board) {
     List<Move> moves = new ArrayList<>();
@@ -34,6 +38,10 @@ public class Bishop extends Piece {
     return moves;
   }
 
+  /**
+   * Walks in one direction adding every empty square; stops at the first occupied square, adding a
+   * capture if it holds an enemy (kings are excluded because they can never actually be captured).
+   */
   private void addDirection(
       List<Move> moves, Position start, Board board, int rowStep, int columnStep) {
     int row = start.getRow() + rowStep;
