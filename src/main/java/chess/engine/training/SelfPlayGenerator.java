@@ -10,6 +10,7 @@ import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -23,6 +24,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>This is the data source for {@link GameTrainer}: every finished game is stored as a PGN file
  * including its result, and the trainer learns from whole games rather than individually labelled
  * positions.
+ *
+ * <p>Every move chosen by search is annotated with its ROOT SCORE as a comment ({@code e4 { ev 34
+ * }}), centipawns from the mover's perspective. The score costs nothing extra — the search already
+ * computed it to pick the move — and it gives the trainer dense, low-noise supervision that plain
+ * game results cannot: two engines of equal strength produce near-random outcomes, but their search
+ * evaluations are stable position facts. See GameTrainer's target blending.
  *
  * <p>Games are played IN PARALLEL, one independent engine per worker thread, which makes large
  * datasets (hundreds of games per iteration) practical.
@@ -50,6 +57,12 @@ public final class SelfPlayGenerator {
   private static final int OPENING_PLIES = 10;
   private static final int RANDOM_MOVE_PLIES = 12;
   private static final double RANDOM_MOVE_PROBABILITY = 0.10;
+
+  /**
+   * Root scores beyond this many centipawns (forced mates and their defences) are clamped before
+   * being written, so evaluation comments stay inside a sane regression range.
+   */
+  private static final int EVAL_COMMENT_CLAMP_CP = 1000;
 
   /*
    * Adjudication: after this many plies a game whose material
@@ -176,6 +189,11 @@ public final class SelfPlayGenerator {
     SearchEngine engine = new SearchEngine(); // loads the current NNUE weights
     Board board = new Board();
     List<String> sanMoves = new ArrayList<>();
+    /*
+     * Root score (centipawns, mover perspective) per recorded move; null for book and random
+     * moves, which carry no meaningful evaluation.
+     */
+    Double[] moveScores = new Double[64];
     int openingPlies = Math.min(openingLine.size(), OPENING_PLIES);
 
     String result;
@@ -213,21 +231,28 @@ public final class SelfPlayGenerator {
         break;
       }
 
-      Move move = selectMove(board, engine, ply, openingLine, openingPlies, random);
-      if (move == null) {
+      SelectedMove selected = selectMove(board, engine, ply, openingLine, openingPlies, random);
+      if (selected == null || selected.move() == null) {
         result = "1/2-1/2";
         termination = "no legal move";
         break;
       }
 
-      sanMoves.add(board.formatMove(move));
-      board.playMove(move);
+      if (ply >= moveScores.length) {
+        moveScores = Arrays.copyOf(moveScores, moveScores.length * 2);
+      }
+      moveScores[ply] = selected.rootScoreCp();
+      sanMoves.add(board.formatMove(selected.move()));
+      board.playMove(selected.move());
     }
 
-    return toPgn(sanMoves, result, termination);
+    return toPgn(sanMoves, moveScores, result, termination);
   }
 
-  private Move selectMove(
+  /** A chosen move plus the root search score that justified it ({@code null} when not searched). */
+  private record SelectedMove(Move move, Double rootScoreCp) {}
+
+  private SelectedMove selectMove(
       Board board,
       SearchEngine engine,
       int ply,
@@ -237,15 +262,22 @@ public final class SelfPlayGenerator {
 
     if (ply < openingPlies) {
       Move bookMove = SanMoveParser.parse(board, openingLine.get(ply));
-      if (bookMove != null) return bookMove;
+      if (bookMove != null) return new SelectedMove(bookMove, null);
     }
 
     if (ply < RANDOM_MOVE_PLIES && random.nextDouble() < RANDOM_MOVE_PROBABILITY) {
       List<Move> legal = board.getLegalMoves(board.isWhiteToMove());
-      if (!legal.isEmpty()) return legal.get(random.nextInt(legal.size()));
+      if (!legal.isEmpty()) return new SelectedMove(legal.get(random.nextInt(legal.size())), null);
     }
 
-    return engine.findBestMove(board, SEARCH_DEPTH, timePerMoveMs).bestMove();
+    SearchEngine.SearchResult searchResult =
+        engine.findBestMove(board, SEARCH_DEPTH, timePerMoveMs);
+    if (searchResult.bestMove() == null) return new SelectedMove(null, null);
+
+    int score = searchResult.score();
+    if (score > EVAL_COMMENT_CLAMP_CP) score = EVAL_COMMENT_CLAMP_CP;
+    else if (score < -EVAL_COMMENT_CLAMP_CP) score = -EVAL_COMMENT_CLAMP_CP;
+    return new SelectedMove(searchResult.bestMove(), (double) score);
   }
 
   private static int materialCount(Board board, boolean white) {
@@ -269,7 +301,8 @@ public final class SelfPlayGenerator {
     return end > start ? pgn.substring(start, end) : "*";
   }
 
-  private static String toPgn(List<String> sanMoves, String result, String termination) {
+  private static String toPgn(
+      List<String> sanMoves, Double[] moveScores, String result, String termination) {
     StringBuilder pgn = new StringBuilder();
     LocalDate now = LocalDate.now();
     String date =
@@ -292,7 +325,15 @@ public final class SelfPlayGenerator {
       if (i % 2 == 0) {
         pgn.append(i / 2 + 1).append(". ");
       }
-      pgn.append(sanMoves.get(i)).append(' ');
+      pgn.append(sanMoves.get(i));
+      /*
+       * Evaluation comment keyed to the position the move was played FROM (mover perspective,
+       * centipawns). PgnGame aligns comments to their preceding SAN token by document order.
+       */
+      if (moveScores != null && i < moveScores.length && moveScores[i] != null) {
+        pgn.append(" { ev ").append(moveScores[i].intValue()).append(" }");
+      }
+      pgn.append(' ');
     }
     pgn.append(result).append("\n\n");
     return pgn.toString();

@@ -39,56 +39,47 @@ import java.util.stream.Stream;
  * Trains the NNUE evaluation network FROM GAMES.
  *
  * <p>Every PGN file under {@code games/} is replayed move by move. Each position is labelled with a
- * TEMPORAL OUTCOME TARGET (see {@link #temporalWhiteTarget}) instead of the game's bare final
- * result. Assigning the final +1/0/-1 to EVERY ply asserts that an equal opening position was
- * already winning because someone blundered 40 plies later — mostly noise, which is why earlier
- * runs memorised the training set (train MSE falling to ~0.35) while validation MSE climbed
- * (~0.57). Temporal targets keep the long-term signal but let each position supervise mainly with
- * what happened AROUND it.
+ * BLEND of two recorded-game signals instead of the game's bare final result:
  *
- * <p>HOW THE TARGET IS BUILT (only recorded-game facts — no engine, no synthetic evaluations):
+ * <ol>
+ *   <li><b>Search evaluation</b> (when the PGN carries a {@code { ev N }} comment for that move,
+ *       written by {@link SelfPlayGenerator}): the root score of the position, converted through
+ *       tanh({@code cp / EVAL_TARGET_SCALE_CP}) onto [-1, +1]. Self-play outcomes between equal
+ *       engines are near-random coin flips decided by opening line and injected randomness, but
+ *       search evaluations are stable POSITION facts — dense supervision that generalizes instead
+ *       of noise that can only be memorised. This is why earlier runs showed train MSE falling
+ *       (~0.06) while validation MSE climbed back to the baseline.
+ *   <li><b>Temporal outcome target</b> (see {@link #temporalWhiteTarget}): an exponentially decaying
+ *       final-result signal, kept as an anchor so absolute judgements stay calibrated to what
+ *       actually happened.
+ * </ol>
  *
- * <ul>
- *   <li><b>Horizon-limited outcomes.</b> For a position {@code ply} half-moves into a game of
- *       {@code totalPlies} half-moves, a horizon {@code h} contributes the TRUE final result if the
- *       game ended within the next {@code h} plies ({@code totalPlies - ply <= h}), else 0 ("no
- *       decision inside the window").
- *   <li><b>Three horizons:</b> near ({@value #NEAR_FUTURE_PLIES} plies), medium ({@value
- *       #MEDIUM_FUTURE_PLIES}), long ({@value #LONG_FUTURE_PLIES}), blended with decreasing
- *       influence 0.5 / 0.3 / 0.2 — closer futures say more about the position.
- *   <li><b>Final-result anchor.</b> {@code target = 0.85 * futureBlend + 0.15 * finalResult}, so
- *       the ultimate outcome still supplies long-term information without dominating every row.
- *   <li><b>Side to move.</b> The blend is computed from WHITE's perspective and flipped for
- *       black-to-move positions, preserving the mover-perspective [-1, +1] contract of the tanh
- *       network output.
- * </ul>
+ * <p>{@code target = (1 - RESULT_MIX) * evalTarget + RESULT_MIX * temporalTarget}. Rows without an
+ * evaluation comment (older games) fall back to the pure temporal target at reduced gradient
+ * weight ({@link #RESULT_ONLY_ROW_WEIGHT}).
  *
- * <p>FURTHER ANTI-OVERFITTING MEASURES (mechanics unchanged from previous versions):
+ * <p>FURTHER ANTI-OVERFITTING MEASURES:
  *
  * <ul>
  *   <li><b>Augmented twins keep their target.</b> Labels are MOVER-perspective. The rank-mirrored
  *       colour-swapped twin flips BOTH the perspective and the outcome, which cancel — so its
- *       correct label equals the original's. Negating it (a long-standing bug) handed the net
- *       systematically contradictory supervision on half of all rows; the only consistent fit was
- *       "output ~0 everywhere".
+ *       correct label equals the original's.
  *   <li><b>Position-level deduplication across games.</b> Every unique position (hashed from its
  *       sparse feature vector) is assigned to exactly ONE set: first occurrence wins,
  *       deterministically. All occurrences inside a set merge into ONE row whose target is the MEAN
- *       temporal target over occurrences — an empirical expectation instead of a single noisy
- *       sample. Because temporal targets are far less noisy than raw ±1 results, the Bayesian
- *       shrinkage prior shrank from 0.25 to {@value #LABEL_SHRINKAGE_PRIOR}.
- *   <li><b>Soft draw supervision.</b> A draw (target 0) is weaker evidence than a decisive result
- *       (genuinely equal, missed wins, or unconverted advantage), so drawn-game rows get a reduced
- *       gradient weight ({@value #DRAW_EXAMPLE_WEIGHT}). The old ply-based loss RAMP is gone:
- *       temporal targets already encode how close a position was to a decision, so all decisive
- *       rows weigh exactly 1.0 and no position is boosted merely for occurring late in its game.
+ *       target over occurrences, shrunk toward zero by {@link #LABEL_SHRINKAGE_PRIOR}.
+ *   <li><b>Soft draw supervision.</b> Drawn-game rows without evaluations get reduced gradient
+ *       weight ({@link #DRAW_EXAMPLE_WEIGHT}); evaluation-backed rows weigh fully because their
+ *       label quality does not depend on how the game ended.
  *   <li><b>Light dropout</b> on hidden layers 2–3 during training passes only.
  *   <li>All positions are precomputed ONCE as sparse feature vectors, so epochs spend their time on
  *       gradient steps instead of re-parsing SAN.
  *   <li>The optimizer is Adam (adaptive per-parameter step sizes).
  *   <li>Batches are shuffled at POSITION level and processed in parallel across worker threads.
- *   <li>Warm starting from {@code nnue_weights.bin} only happens when the stored network actually
- *       beats a fresh random initialization on the validation split.
+ *   <li>Warm starting considers BOTH saved checkpoints ({@code nnue_weights.bin} and {@code
+ *       nnue_weights_best.bin}) and keeps whichever beats the baseline AND a fresh random
+ *       initialization; a resumed run starts at a REDUCED learning rate so Adam's state reset does
+ *       not immediately wreck a good network.
  * </ul>
  *
  * <p>CROSS-RUN STATE (the trainer remembers its best between invocations):
@@ -141,12 +132,14 @@ public final class GameTrainer {
   /**
    * v2 adds the per-example loss weight and the 64-bit position key used to keep held-out positions
    * out of the training set. v3 rebuilt targets under LABEL_SHRINKAGE_PRIOR 0.25 (v2 rows were
-   * shrunk with prior 2.0 and would silently mismatch the training label scale). v5 rebuilds targets under the SMOOTH TEMPORAL outcome system (continuous exponential decay, prior 0.05,
-   * softened draw weights): v4 cached rows carry the previous piecewise temporal labels whose semantics
-   * differ from training, so reusing them would measure a different objective than the one the
-   * network is trained on. Bump again whenever feature/labelling semantics change.
+   * shrunk with prior 2.0 and would silently mismatch the training label scale). v5 rebuilt targets
+   * under the smooth temporal outcome system. v6 rebuilt validation from EVALUATION-BEARING games
+   * under the blended search-eval + temporal objective. v7 rebuilds again because v6 rows were
+   * labelled with MISALIGNED evaluation comments (each eval attached ~10 plies too early, onto the
+   * uncommented opening prefix) — a PgnGame parsing bug since fixed; reusing those rows would keep
+   * training against noise. Bump again whenever feature/labelling semantics change.
    */
-  private static final int VALIDATION_CACHE_VERSION = 5;
+  private static final int VALIDATION_CACHE_VERSION = 7;
 
   /** Upper bound on cached validation examples so the cache stays small and fast to load. */
   private static final int VALIDATION_CACHE_MAX_EXAMPLES = 200_000;
@@ -170,7 +163,14 @@ public final class GameTrainer {
   private static final double ADAM_EPS = 1.0e-8;
 
   /** Decoupled weight decay (AdamW style). */
-  private static final double WEIGHT_DECAY = 0.008;
+  private static final double WEIGHT_DECAY = 0.04;
+
+  /**
+   * Fraction of {@link #LEARNING_RATE} used at the START of a warm-started run. Adam's moment
+   * estimates reset between invocations, so full-size steps immediately knock a converged network
+   * off its optimum; the reduced rate plus the usual decay schedule lets it settle first.
+   */
+  private static final double WARM_START_LR_FRACTION = 0.5;
 
   private static final double GRAD_CLIP_NORM = 2.0;
   private static final double LR_DECAY = 0.65;
@@ -206,7 +206,12 @@ public final class GameTrainer {
   private static final double DIVERGENCE_MARGIN_RELATIVE = 0.05;
   private static final int DIVERGENCE_CHECKPOINTS = 4;
   private static final int DIVERGENCE_COOLDOWN = 12;
-  private static final double MIN_VALIDATION_IMPROVEMENT = 1e-4;
+  /*
+   * Validation noise between adjacent checkpoints is small but nonzero (dropout-free evaluation on
+   * a fixed set keeps it tiny); 1e-4 discarded real mid-training improvements of warm-started
+   * runs, which is one reason the overnight pipeline recorded no new bests for hours.
+   */
+  private static final double MIN_VALIDATION_IMPROVEMENT = 2e-5;
   private static final double VALIDATION_RATIO = 0.10;
 
   private static final int MIN_PLY = 6;
@@ -266,6 +271,41 @@ public final class GameTrainer {
   private static final double TEMPORAL_DECAY_PLIES = 36.0;
 
   /*
+   * ======================= SEARCH-EVAL TARGET BLEND =======================
+   *
+   * Self-play PGNs carry a per-move root score ({@code { ev N }}, centipawns, mover perspective)
+   * written by SelfPlayGenerator at zero extra cost — the search already computed it to pick the
+   * move. For any position WITH such a comment the label becomes
+   *
+   *   target = (1 - RESULT_MIX) * tanh(whiteEvalCp / EVAL_TARGET_SCALE_CP)
+   *          +        RESULT_MIX    * temporalWhiteTarget(...)
+   *
+   * while positions WITHOUT one keep the pure temporal target at reduced gradient weight.
+   *
+   * WHY: self-play outcomes between two identical engines are near-random coin flips driven by
+   * opening line and injected randomness; outcome-only labels are mostly game-specific noise the
+   * network can only memorise (train MSE down, validation MSE up). Search evaluations are stable
+   * facts ABOUT THE POSITION — the same dense-supervision principle Stockfish NNUE training uses —
+   * so they generalize across games instead of overfitting them.
+   */
+  /** Centipawn scale of the tanh squash: +-350cp maps to ~+-0.96, keeping headroom for worse. */
+  private static final double EVAL_TARGET_SCALE_CP = 350.0;
+
+  /**
+   * Weight of the temporal-outcome component inside blended labels; the remaining mass comes from
+   * the search evaluation. Small by design: the eval already dominates and the outcome anchor only
+   * calibrates absolute judgements toward what actually happened.
+   */
+  private static final double RESULT_MIX = 0.15;
+
+  /**
+   * Gradient weight multiplier for rows WITHOUT an evaluation comment (older games). Their
+   * outcome-only labels are noisier than blended ones, so they contribute less per occurrence but
+   * still train — the fallback keeps the whole historical corpus usable.
+   */
+  private static final double RESULT_ONLY_ROW_WEIGHT = 0.6;
+
+  /*
    * Merged-row targets are means of k noisy samples shrunk toward zero by this many virtual
    * zero-outcome observations: target = sum / (count + prior). REDUCED from 0.25 because temporal
    * targets already have far lower variance than the old +-1 final-result labels; the prior now
@@ -285,10 +325,10 @@ public final class GameTrainer {
 
   /**
    * Inverted dropout keep-rate floor on hidden layers 2 and 3 during TRAINING forward passes only
-   * (evaluation never drops). Small by design: deduplication already removed most memorisation
-   * fuel, so dropout is a seatbelt, not the main brake.
+   * (evaluation never drops). Raised slightly because single-occurrence rows still invite
+   * memorisation; evaluation-backed labels reduce the pressure but do not remove it.
    */
-  private static final double DROPOUT_RATE = 0.08;
+  private static final double DROPOUT_RATE = 0.10;
 
   /** Maximum number of parallel chunk ranges; matches the gradient-buffer pool size. */
   private static final int MAX_CHUNKS = 16;
@@ -399,8 +439,24 @@ public final class GameTrainer {
 
   private int malformedGames;
 
+  /** Set by {@link #chooseStartingWeights} when training resumes from an existing checkpoint. */
+  private boolean warmStarted;
+
   /** A parsed game ready to be replayed into training examples. */
-  private record ReplayableGame(List<String> sanMoves, double whiteOutcome) {}
+  private record ReplayableGame(List<String> sanMoves, double[] evalCp, double whiteOutcome) {
+
+    /** Search score in centipawns (mover perspective) for {@code ply}, or NaN when unannotated. */
+    double evalCpAt(int ply) {
+      return evalCp != null && ply < evalCp.length ? evalCp[ply] : Double.NaN;
+    }
+
+    /** True when at least one move of the game carries an evaluation comment. */
+    boolean hasEvaluations() {
+      if (evalCp == null) return false;
+      for (double v : evalCp) if (!Double.isNaN(v)) return true;
+      return false;
+    }
+  }
 
   /**
    * True when the game belongs in the validation set: the last {@code VALIDATION_RATIO} fraction of
@@ -449,7 +505,7 @@ public final class GameTrainer {
           malformedGames++;
           continue;
         }
-        games.add(new ReplayableGame(pgn.getSanMoves(), outcome));
+        games.add(new ReplayableGame(pgn.getSanMoves(), pgn.getEvalCp(), outcome));
       }
     }
     return games;
@@ -533,16 +589,20 @@ public final class GameTrainer {
           SparseExample sparse = sparsify(extractor.extract(board));
 
           /*
-           * TEMPORAL TARGET: blend horizon-limited outcomes with the final result (see
-           * {@link #temporalWhiteTarget}). The blend is computed from WHITE's perspective and then
-           * FLIPPED for black-to-move positions, so every label stays on the mover-perspective
-           * [-1, +1] scale that the tanh network output predicts.
+           * BLENDED TARGET: search evaluation (when the move carries a { ev N } comment) dominates,
+           * with the temporal outcome as anchor (see {@link #temporalWhiteTarget}). Both components
+           * are computed from WHITE's perspective and then FLIPPED for black-to-move positions, so
+           * every label stays on the mover-perspective [-1, +1] scale that the tanh network output
+           * predicts.
            *
            * Note: totalPlies counts the full recorded SAN list. If a game contains a corrupt tail
            * move the replay stops early; such games are rare, and the effect is only a slightly
            * softer target near their truncated end.
            */
-          double whitePerspectiveTarget = temporalWhiteTarget(whiteOutcome, totalPlies, ply);
+          double evalCp = game.evalCpAt(ply);
+          boolean hasEval = !Double.isNaN(evalCp);
+          double whitePerspectiveTarget =
+                  blendedWhiteTarget(whiteOutcome, totalPlies, ply, hasEval ? evalCp : 0.0, hasEval);
           double sideToMoveTarget =
                   board.isWhiteToMove() ? whitePerspectiveTarget : -whitePerspectiveTarget;
           candidates.add(
@@ -551,7 +611,7 @@ public final class GameTrainer {
                           sparse.indices(),
                           sparse.values(),
                           sideToMoveTarget,
-                          (float) exampleWeight(whiteOutcome, sideToMoveTarget)));
+                          (float) exampleWeight(whiteOutcome, sideToMoveTarget, hasEval)));
         }
         board.playMove(move);
       }
@@ -684,25 +744,36 @@ public final class GameTrainer {
   }
 
   /**
-   * Gradient weight for one occurrence of a position. Decisive games weigh exactly 1.0 — no
-   * position is boosted merely because it occurred late in its game; drawn games are softened by
-   * {@link #DRAW_EXAMPLE_WEIGHT} because a draw target is weaker evidence than a decisive one.
-   *
-   * <p>The previous ply-based ramp ({@code 0.25 -> 1.0 over 24 plies}) existed solely to compensate
-   * for final-result noise dominating opening plies. Temporal targets remove that noise at its
-   * source, so the ramp would now distort training without benefit.
+   * Final WHITE-perspective label for one occurrence: {@code tanh(evalCp / EVAL_TARGET_SCALE_CP)}
+   * blended with the temporal outcome when the move carries a search-evaluation comment, otherwise
+   * just the temporal outcome. Guaranteed to lie in [-1, +1]. The caller flips the sign for
+   * black-to-move positions.
    */
-  private static double exampleWeight(double whiteOutcome, double target) {
-    double drawMultiplier = whiteOutcome == 0.0 ? DRAW_EXAMPLE_WEIGHT : 1.0;
+  private static double blendedWhiteTarget(
+          double whiteOutcome, int totalPlies, int ply, double evalCp, boolean hasEval) {
+    double temporal = temporalWhiteTarget(whiteOutcome, totalPlies, ply);
+    if (!hasEval) return temporal;
 
-    /*
-     * Very early positions have weaker recorded-game evidence than positions close to the actual
-     * decision. Keep a nonzero floor so openings still train, but spend more gradient budget where
-     * the target contains more information.
-     */
+    double evalTarget = Math.tanh(evalCp / EVAL_TARGET_SCALE_CP);
+    return (1.0 - RESULT_MIX) * evalTarget + RESULT_MIX * temporal;
+  }
+
+  /**
+   * Gradient weight for one occurrence of a position.
+   *
+   * <p>Evaluation-backed rows weigh exactly 1.0: their labels are stable position facts whose
+   * quality does not depend on how the game ended. Result-only rows (older PGNs) are down-weighted
+   * by {@link #RESULT_ONLY_ROW_WEIGHT}, drawn games further by {@link #DRAW_EXAMPLE_WEIGHT}, and
+   * very early positions by a signal floor, because outcome-only evidence grows with proximity to
+   * the actual decision.
+   */
+  private static double exampleWeight(double whiteOutcome, double target, boolean hasEval) {
+    if (hasEval) return 1.0;
+
+    double drawMultiplier = whiteOutcome == 0.0 ? DRAW_EXAMPLE_WEIGHT : 1.0;
     double signal = Math.abs(target);
     double signalMultiplier = 0.35 + 0.65 * signal;
-    return drawMultiplier * signalMultiplier;
+    return RESULT_ONLY_ROW_WEIGHT * drawMultiplier * signalMultiplier;
   }
 
   private static SparseExample sparsify(double[] features) {
@@ -894,7 +965,9 @@ public final class GameTrainer {
    * Returns the fixed validation set: loaded from {@link #VALIDATION_CACHE_FILE} when present,
    * otherwise built from the current validation games, subsampled deterministically and cached.
    *
-   * <p>Either path also populates {@link #validationKeys} so later training builds can exclude
+   * <p>When building, games WITH evaluation comments are preferred so the measured objective
+   * matches what training optimizes; result-only games are used only when no annotated game exists
+   * at all. Either path also populates {@link #validationKeys} so later training builds can exclude
    * held-out positions even when thousands of new self-play games replay the same opening lines.
    *
    * <p>A corrupted or outdated cache (version/architecture mismatch) is detected and rebuilt
@@ -914,8 +987,14 @@ public final class GameTrainer {
       return cached;
     }
 
-    List<SparseExample> built =
-            buildExamples(validationGames, extractor, "validation", false, null, null);
+    List<ReplayableGame> evalGames = new ArrayList<>();
+    for (ReplayableGame game : validationGames) if (game.hasEvaluations()) evalGames.add(game);
+    List<ReplayableGame> source = evalGames.isEmpty() ? validationGames : evalGames;
+    System.out.printf(
+            "Building validation from %d game(s) (%d with evaluation comments).%n",
+            source.size(), evalGames.size());
+
+    List<SparseExample> built = buildExamples(source, extractor, "validation", false, null, null);
     built = subsampleStride(built, VALIDATION_CACHE_MAX_EXAMPLES);
     saveValidationCache(cache, built);
     validationKeys = collectKeys(built);
@@ -1204,7 +1283,12 @@ public final class GameTrainer {
     Gradients[] buffers = new Gradients[MAX_CHUNKS];
     for (int i = 0; i < buffers.length; i++) buffers[i] = new Gradients();
 
-    double lr = LEARNING_RATE;
+    /*
+     * A resumed run starts slower: Adam's moments are empty, so full-size first steps would
+     * immediately knock a converged network off its optimum (the overnight pipeline's runs kept
+     * degrading their warm start within the first few hundred batches).
+     */
+    double lr = warmStarted ? LEARNING_RATE * WARM_START_LR_FRACTION : LEARNING_RATE;
     NNUEWeights bestWeights = deepCopy(weights);
     double bestValidationLoss = evaluateParallel(executor, weights, validation).mse;
     int checkpointsSinceBest = 0;
@@ -1435,43 +1519,68 @@ public final class GameTrainer {
   }
 
   /**
-   * Picks the starting point for training. The previously saved network only survives when it beats
-   * BOTH the trivial predict-zero baseline AND a fresh random initialization on the validation
-   * split — a degenerate net can score well by outputting tiny values everywhere, which says
-   * nothing about chess.
+   * Picks the starting point for training. BOTH saved checkpoints are considered — the working
+   * file and the protected all-time-best file — and whichever evaluates better on the fixed
+   * validation set survives, provided it beats the trivial predict-zero baseline AND a fresh random
+   * initialization (a degenerate net can score well by outputting tiny values everywhere, which
+   * says nothing about chess). Previously only the working file was consulted, so progress stored
+   * exclusively in the best checkpoint could be thrown away.
    */
   private NNUEWeights chooseStartingWeights(
           ExecutorService executor, List<SparseExample> validation, double baselineMse) {
-    NNUEWeights warm = loadStartingWeights();
+    List<NNUEWeights> candidates = new ArrayList<>();
+    for (String name : new String[] {OUTPUT_FILE, BEST_WEIGHTS_FILE}) {
+      NNUEWeights w = loadWeightsFile(name);
+      if (w != null) candidates.add(w);
+    }
     NNUEWeights fresh = NNUEWeights.random(SEED ^ System.nanoTime());
 
-    if (warm == null) {
+    if (candidates.isEmpty()) {
       System.out.println("Starting from a fresh random initialization.");
       return fresh;
     }
 
-    double warmScore = evaluateParallel(executor, warm, validation).mse;
+    NNUEWeights best = null;
+    double bestScore = Double.POSITIVE_INFINITY;
+    for (NNUEWeights candidate : candidates) {
+      double score = evaluateParallel(executor, candidate, validation).mse;
+      String origin = candidate == candidates.get(0) ? OUTPUT_FILE : BEST_WEIGHTS_FILE;
+      if (score < baselineMse && score <= bestScore) {
+        bestScore = score;
+        best = candidate;
+        System.out.printf(
+                "Candidate %s: validation MSE %.4f (baseline %.4f) - eligible.%n",
+                origin, score, baselineMse);
+      } else {
+        System.out.printf(
+                "Candidate %s: validation MSE %.4f (baseline %.4f) - rejected.%n",
+                origin, score, baselineMse);
+      }
+    }
+
     double freshScore = evaluateParallel(executor, fresh, validation).mse;
-    if (warmScore < baselineMse && warmScore <= freshScore) {
+    if (best != null && bestScore <= freshScore) {
+      warmStarted = true;
       System.out.printf(
-              "Warm-starting from existing %s (validation MSE %.4f vs %.4f for fresh init).%n",
-              OUTPUT_FILE, warmScore, freshScore);
-      return warm;
+              "Warm-starting from existing checkpoint (validation MSE %.4f vs %.4f for fresh"
+                      + " init); initial learning rate reduced to %.2e.%n",
+              bestScore, freshScore, LEARNING_RATE * WARM_START_LR_FRACTION);
+      return best;
     }
     System.out.printf(
-            "Discarding stale %s (validation MSE %.4f; must beat baseline %.4f to be reused),"
-                    + " starting fresh (%.4f).%n",
-            OUTPUT_FILE, warmScore, baselineMse, freshScore);
+            "Discarding stale checkpoints (best %.4f; must beat both baseline %.4f and fresh init"
+                    + " %.4f), starting fresh.%n",
+            bestScore, baselineMse, freshScore);
     return fresh;
   }
 
-  private static NNUEWeights loadStartingWeights() {
-    File file = new File(OUTPUT_FILE);
+  private static NNUEWeights loadWeightsFile(String name) {
+    File file = new File(name);
     if (!file.isFile()) return null;
     try {
       return NNUEWeights.load(file);
     } catch (IOException e) {
-      System.err.println("Could not read " + OUTPUT_FILE + ", using fresh init: " + e.getMessage());
+      System.err.println("Could not read " + name + ": " + e.getMessage());
       return null;
     }
   }
