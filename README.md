@@ -122,12 +122,14 @@ by color-swapped mirroring, and split into stable training and validation sets.
 Self-play PGNs attach a search score to each searched move:
 
 ```text
-1. e4 { ev 24 } e5 { ev 11 }
+1. e4 { ev 24 depth 8 } e5 { ev 11 depth 9 }
 ```
 
 The label blends that side-to-move search evaluation with a temporally weighted game result. PGNs
-without evaluation comments remain usable at lower weight. Invalid legacy timeout scores are
-rejected, and result-only examples are limited so they cannot overwhelm evaluation-backed data.
+without evaluation comments remain usable at lower weight. Deeper search labels receive more
+weight, invalid legacy timeout scores are rejected, and result-only examples are limited so they
+cannot overwhelm evaluation-backed data. All non-self-play PGNs and the newest 64 self-play batches
+are used so obsolete labels from much weaker checkpoints do not dominate later training.
 
 The optimizer is AdamW-style Adam with gradient clipping, dropout, learning-rate reduction,
 validation checkpoints, and early stopping. Training writes:
@@ -143,9 +145,10 @@ validation checkpoints, and early stopping. Training writes:
 java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator [games] [timeMs] [threads]
 ```
 
-Defaults are 256 games, 200 ms per searched move, and half the available processors. Output is
+Defaults are 256 games, 400 ms per searched move, and half the available processors. Output is
 written to `games/selfplay/`. Opening moves come from the built-in book; every later move is chosen
-by search, not randomly.
+by search, not randomly. Opening lines are shuffled and used evenly, with a varied book-prefix
+length to create different searched positions without injecting random moves.
 
 Example:
 
@@ -179,11 +182,13 @@ java -cp build/classes/java/main chess.engine.training.TrainingPipeline \
   [hours] [gamesPerIteration] [timeMs] [threads] [epochs]
 ```
 
-Current defaults are 12 hours, 256 games per iteration, 200 ms per searched move, half the
+Current defaults are 12 hours, 256 games in the first iteration, 400 ms per searched move, half the
 available processors, and at most 16 epochs per training stage. Each iteration generates fresh
-self-play games using the current checkpoint, trains on all PGNs under `games/`, protects the best
-validation checkpoint, and repeats until the time window expires. At least 100 games per iteration
-are required.
+self-play games using the current checkpoint, trains the NNUE, protects the best validation
+checkpoint, and repeats until the time window expires. Games grow by 20% per iteration up to 4x the
+starting count, while move time grows by 10% up to 3x. The pipeline avoids starting a larger
+iteration when its previous iteration would not fit in the remaining window. At least 100 games per
+iteration are required.
 
 Example:
 

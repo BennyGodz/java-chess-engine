@@ -15,6 +15,10 @@ public final class TrainingPipeline {
   private static final long DEFAULT_TIME_PER_MOVE_MS = SelfPlayGenerator.DEFAULT_TIME_PER_MOVE_MS;
   private static final int DEFAULT_EPOCHS = 16;
   private static final int MIN_GAMES_PER_ITERATION = 100;
+  private static final double GAME_GROWTH = 1.20;
+  private static final double TIME_GROWTH = 1.10;
+  private static final double MAX_GAME_MULTIPLIER = 4.0;
+  private static final double MAX_TIME_MULTIPLIER = 3.0;
   private static final String BEST_WEIGHTS_FILE = "nnue_weights_best.bin";
   private static final String WORKING_WEIGHTS_FILE = "nnue_weights.bin";
   private static final String TRAINING_HISTORY_FILE = "training_history.log";
@@ -43,14 +47,36 @@ public final class TrainingPipeline {
     System.out.printf("Pipeline runtime: %.2f hours%n", runtimeHours);
 
     int completedIterations = 0;
+    long previousIterationNanos = 0;
 
     while (System.nanoTime() < pipelineDeadlineNanos) {
+      long remainingNanos = pipelineDeadlineNanos - System.nanoTime();
+      if (previousIterationNanos > 0 && remainingNanos < previousIterationNanos) {
+        System.out.println("Not starting another growing iteration inside the remaining window.");
+        break;
+      }
+
       completedIterations++;
+      long iterationStart = System.nanoTime();
+      int iterationGames =
+          (int)
+              Math.min(
+                  Integer.MAX_VALUE,
+                  progressiveValue(
+                      gamesPerIteration,
+                      completedIterations - 1,
+                      GAME_GROWTH,
+                      MAX_GAME_MULTIPLIER));
+      long iterationTimeMs =
+          progressiveValue(
+              timePerMoveMs, completedIterations - 1, TIME_GROWTH, MAX_TIME_MULTIPLIER);
 
       System.out.println();
       System.out.println("========================================");
       System.out.println("ITERATION " + completedIterations);
       System.out.println("========================================");
+      System.out.printf(
+          "Self-play target: %d games at %d ms/move.%n", iterationGames, iterationTimeMs);
 
       printRemainingTime(pipelineStartNanos, pipelineDeadlineNanos);
 
@@ -74,7 +100,7 @@ public final class TrainingPipeline {
         System.out.println("Starting self play with seed " + iterationSeed);
 
         SelfPlayGenerator generator =
-            new SelfPlayGenerator(gamesPerIteration, timePerMoveMs, iterationSeed, threads);
+            new SelfPlayGenerator(iterationGames, iterationTimeMs, iterationSeed, threads);
         generator.generate();
 
         long generationSeconds = (System.nanoTime() - generationStart) / 1_000_000_000L;
@@ -126,6 +152,7 @@ public final class TrainingPipeline {
         System.err.println("  WARNING: best checkpoint is missing: " + BEST_WEIGHTS_FILE);
       }
 
+      previousIterationNanos = System.nanoTime() - iterationStart;
       printRemainingTime(pipelineStartNanos, pipelineDeadlineNanos);
 
       if (System.nanoTime() >= pipelineDeadlineNanos) {
@@ -203,6 +230,8 @@ public final class TrainingPipeline {
     System.out.printf("Runtime                 : %.2f hours%n", runtimeHours);
     System.out.println("Games / iteration       : " + gamesPerIteration);
     System.out.println("Time / move             : " + timePerMoveMs + " ms");
+    System.out.printf(
+        "Iteration growth         : games x%.2f, time x%.2f%n", GAME_GROWTH, TIME_GROWTH);
     System.out.println("Training threads        : " + threads);
     System.out.println("Maximum epochs          : " + epochs);
     System.out.println("Best network            : " + BEST_WEIGHTS_FILE);
@@ -224,6 +253,12 @@ public final class TrainingPipeline {
     z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
     z = (z ^ (z >>> 27)) * 0x94D049BB133111EBL;
     return z ^ (z >>> 31);
+  }
+
+  static long progressiveValue(long baseValue, int iteration, double growth, double maxMultiplier) {
+    double cap = Math.min(Long.MAX_VALUE, baseValue * maxMultiplier);
+    double grown = baseValue * Math.pow(growth, Math.max(0, iteration));
+    return Math.max(baseValue, Math.round(Math.min(cap, grown)));
   }
 
   private static boolean ensureNetworkExists() {

@@ -68,6 +68,7 @@ public final class GameTrainer {
   private static final int MIN_LR_PATIENCE = 20;
   private static final int MIN_EARLY_STOP_PATIENCE = 80;
   private static final double DIVERGENCE_MARGIN_RELATIVE = 0.05;
+  private static final double MAX_EVAL_MSE_REGRESSION = 0.02;
   private static final int DIVERGENCE_CHECKPOINTS = 4;
   private static final int DIVERGENCE_COOLDOWN = 12;
   private static final double MIN_VALIDATION_IMPROVEMENT = 2e-5;
@@ -77,7 +78,8 @@ public final class GameTrainer {
   private static final long SEED = 12345L;
   private static final int LOG_EVERY_BATCHES = 50;
 
-  private static final int POSITIONS_PER_GAME_CAP = 48;
+  private static final int POSITIONS_PER_GAME_CAP = 64;
+  private static final int MAX_SELFPLAY_FILES = 64;
   private static final int MAX_EXAMPLES = 3_000_000;
   private static final int RESULT_ONLY_EXAMPLES_PER_EVAL = 1;
   private static final double TEMPORAL_BASE_WEIGHT = 0.10;
@@ -181,9 +183,14 @@ public final class GameTrainer {
   private int malformedGames;
   private boolean warmStarted;
 
-  private record ReplayableGame(List<String> sanMoves, double[] evalCp, double whiteOutcome) {
+  private record ReplayableGame(
+      List<String> sanMoves, double[] evalCp, int[] evalDepth, double whiteOutcome) {
     double evalCpAt(int ply) {
       return evalCp != null && ply < evalCp.length ? evalCp[ply] : Double.NaN;
+    }
+
+    int evalDepthAt(int ply) {
+      return evalDepth != null && ply < evalDepth.length ? evalDepth[ply] : 0;
     }
 
     boolean hasEvaluations() {
@@ -210,11 +217,33 @@ public final class GameTrainer {
     Path root = Path.of(GAMES_ROOT);
     if (!Files.isDirectory(root)) return List.of();
     try (Stream<Path> stream = Files.walk(root)) {
-      return stream
-          .filter(p -> p.toString().toLowerCase().endsWith(".pgn"))
-          .map(Path::toFile)
+      List<File> files =
+          stream
+              .filter(p -> p.toString().toLowerCase().endsWith(".pgn"))
+              .map(Path::toFile)
+              .toList();
+      List<File> selfPlay =
+          files.stream()
+              .filter(GameTrainer::isSelfPlayFile)
+              .sorted(
+                  Comparator.comparingLong(File::lastModified)
+                      .reversed()
+                      .thenComparing(File::getPath))
+              .limit(MAX_SELFPLAY_FILES)
+              .toList();
+      long selfPlayFiles = files.stream().filter(GameTrainer::isSelfPlayFile).count();
+      if (selfPlayFiles > selfPlay.size()) {
+        System.out.printf(
+            "Using the newest %d/%d self-play PGN batches; older teacher labels are stale.%n",
+            selfPlay.size(), selfPlayFiles);
+      }
+      return Stream.concat(files.stream().filter(file -> !isSelfPlayFile(file)), selfPlay.stream())
           .toList();
     }
+  }
+
+  private static boolean isSelfPlayFile(File file) {
+    return file.toPath().toString().replace('\\', '/').contains("/selfplay/");
   }
 
   private List<ReplayableGame> loadGames(List<File> pgnFiles) throws IOException {
@@ -229,7 +258,8 @@ public final class GameTrainer {
           malformedGames++;
           continue;
         }
-        games.add(new ReplayableGame(pgn.getSanMoves(), pgn.getEvalCp(), outcome));
+        games.add(
+            new ReplayableGame(pgn.getSanMoves(), pgn.getEvalCp(), pgn.getEvalDepth(), outcome));
       }
     }
     return games;
@@ -285,6 +315,7 @@ public final class GameTrainer {
           SparseExample sparse = sparsify(extractor.extract(board));
 
           double evalCp = game.evalCpAt(ply);
+          int evalDepth = game.evalDepthAt(ply);
           boolean hasEval = isUsableEvaluation(evalCp);
           if (!hasEval && !Double.isNaN(evalCp)) rejectedEvaluations++;
           double sideToMoveTarget =
@@ -301,7 +332,7 @@ public final class GameTrainer {
                   sparse.indices(),
                   sparse.values(),
                   sideToMoveTarget,
-                  (float) exampleWeight(whiteOutcome, sideToMoveTarget, hasEval),
+                  (float) exampleWeight(whiteOutcome, sideToMoveTarget, hasEval, evalDepth),
                   hasEval));
         }
         board.playMove(move);
@@ -390,6 +421,16 @@ public final class GameTrainer {
     return Double.isFinite(evalCp) && Math.abs(evalCp) <= MAX_USABLE_EVAL_CP;
   }
 
+  static double evaluationConfidence(int depth) {
+    return depth <= 0 ? 0.75 : Math.clamp(0.55 + depth * 0.08, 0.75, 1.25);
+  }
+
+  static boolean preservesEvaluationQuality(double candidateMse, double referenceMse) {
+    if (!Double.isFinite(referenceMse)) return true;
+    return Double.isFinite(candidateMse)
+        && candidateMse <= referenceMse * (1.0 + MAX_EVAL_MSE_REGRESSION);
+  }
+
   static List<SparseExample> balanceTrainingExamples(List<SparseExample> examples) {
     List<SparseExample> evalBacked = new ArrayList<>();
     List<SparseExample> resultOnly = new ArrayList<>();
@@ -439,8 +480,9 @@ public final class GameTrainer {
     return (1.0 - RESULT_MIX) * evalSideToMove + RESULT_MIX * temporalSideToMove;
   }
 
-  private static double exampleWeight(double whiteOutcome, double target, boolean hasEval) {
-    if (hasEval) return 1.0;
+  private static double exampleWeight(
+      double whiteOutcome, double target, boolean hasEval, int evalDepth) {
+    if (hasEval) return evaluationConfidence(evalDepth);
 
     double drawMultiplier = whiteOutcome == 0.0 ? DRAW_EXAMPLE_WEIGHT : 1.0;
     double signal = Math.abs(target);
@@ -546,7 +588,8 @@ public final class GameTrainer {
           targetSum[slot] = 0.0;
           weightSum[slot] = 0.0;
         }
-        targetSum[slot] += target;
+        targetSum[slot] += target * weight;
+        weightSum[slot] += weight;
         evalCounts[slot]++;
       } else if (evalCounts[slot] == 0) {
         targetSum[slot] += target;
@@ -605,12 +648,14 @@ public final class GameTrainer {
     }
 
     double targetAt(int slot) {
-      int count = evalCounts[slot] > 0 ? evalCounts[slot] : counts[slot];
+      double count = evalCounts[slot] > 0 ? weightSum[slot] : counts[slot];
       return targetSum[slot] / (count + LABEL_SHRINKAGE_PRIOR);
     }
 
     float weightAt(int slot) {
-      return evalCounts[slot] > 0 ? 1.0f : (float) Math.min(1.0, weightSum[slot] / counts[slot]);
+      return evalCounts[slot] > 0
+          ? (float) Math.min(1.25, weightSum[slot] / evalCounts[slot])
+          : (float) Math.min(1.0, weightSum[slot] / counts[slot]);
     }
 
     int countAt(int slot) {
@@ -773,12 +818,14 @@ public final class GameTrainer {
     File bestFile = new File(BEST_WEIGHTS_FILE);
     double allTimeBestMse = Double.POSITIVE_INFINITY;
     double allTimeBestMae = Double.NaN;
+    double allTimeBestEvalMse = Double.NaN;
 
     if (bestFile.isFile()) {
       try {
         EvalStats stats = evaluateParallel(executor, NNUEWeights.load(bestFile), validation);
         allTimeBestMse = stats.mse;
         allTimeBestMae = stats.mae;
+        allTimeBestEvalMse = stats.mseEval;
         if (state.bestValidationMse != null
             && Math.abs(state.bestValidationMse - allTimeBestMse) > 5.0e-3) {
           System.out.printf(
@@ -940,11 +987,13 @@ public final class GameTrainer {
             bestWeights.save(new File(OUTPUT_FILE));
 
             boolean newAllTimeBest =
-                validationStats.mse < allTimeBestMse - MIN_VALIDATION_IMPROVEMENT;
+                validationStats.mse < allTimeBestMse - MIN_VALIDATION_IMPROVEMENT
+                    && preservesEvaluationQuality(validationStats.mseEval, allTimeBestEvalMse);
             if (newAllTimeBest) {
               double previousAllTime = allTimeBestMse;
               allTimeBestMse = validationStats.mse;
               allTimeBestMae = validationStats.mae;
+              allTimeBestEvalMse = validationStats.mseEval;
 
               bestWeights.save(bestFile);
               state.bestValidationMse = allTimeBestMse;
@@ -979,6 +1028,13 @@ public final class GameTrainer {
               System.out.printf(
                   "  >> new run best: validation MSE %.4f (baseline %.4f); saved to %s%n",
                   bestValidationLoss, baselineMse, OUTPUT_FILE);
+              if (validationStats.mse < allTimeBestMse - MIN_VALIDATION_IMPROVEMENT) {
+                System.out.printf(
+                    "  >> protected best retained: eval-backed MSE %s exceeded the %.4f"
+                        + " safety limit.%n",
+                    fmtOrNone(validationStats.mseEval),
+                    allTimeBestEvalMse * (1.0 + MAX_EVAL_MSE_REGRESSION));
+              }
             }
           } else {
             if (checkpointsSinceBest >= earlyStopPatience) {
@@ -1030,10 +1086,12 @@ public final class GameTrainer {
     bestWeights.save(new File(OUTPUT_FILE));
     EvalStats finalBestStats = evaluateParallel(executor, bestWeights, validation);
 
-    if (bestValidationLoss < allTimeBestMse - MIN_VALIDATION_IMPROVEMENT) {
+    if (bestValidationLoss < allTimeBestMse - MIN_VALIDATION_IMPROVEMENT
+        && preservesEvaluationQuality(finalBestStats.mseEval, allTimeBestEvalMse)) {
       double previousAllTime = allTimeBestMse;
       allTimeBestMse = bestValidationLoss;
       allTimeBestMae = finalBestStats.mae;
+      allTimeBestEvalMse = finalBestStats.mseEval;
       bestWeights.save(bestFile);
       state.bestValidationMse = allTimeBestMse;
       state.bestValidationMae = allTimeBestMae;

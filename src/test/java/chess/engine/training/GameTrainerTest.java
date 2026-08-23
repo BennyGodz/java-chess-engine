@@ -47,6 +47,33 @@ class GameTrainerTest {
   }
 
   @Test
+  void evaluationLabelsAreMergedUsingTheirConfidence() {
+    GameTrainer.PositionTable table = new GameTrainer.PositionTable(1);
+    int[] indices = {0};
+    float[] values = {1.0f};
+
+    table.add(123L, indices, values, 1.0, 0.75, true);
+    table.add(123L, indices, values, -1.0, 1.25, true);
+
+    int slot = occupiedSlot(table);
+    assertEquals(-0.5 / 2.05, table.targetAt(slot), 1.0e-12);
+    assertEquals(1.0f, table.weightAt(slot));
+  }
+
+  @Test
+  void deeperEvaluationsReceiveMoreConfidence() {
+    assertEquals(0.75, GameTrainer.evaluationConfidence(0), 1.0e-12);
+    assertTrue(GameTrainer.evaluationConfidence(7) > GameTrainer.evaluationConfidence(3));
+    assertEquals(1.25, GameTrainer.evaluationConfidence(12), 1.0e-12);
+  }
+
+  @Test
+  void checkpointCannotRegressEvaluationQuality() {
+    assertTrue(GameTrainer.preservesEvaluationQuality(0.101, 0.1));
+    assertFalse(GameTrainer.preservesEvaluationQuality(0.103, 0.1));
+  }
+
+  @Test
   void trainingBalancePreventsResultOnlyRowsFromDominating() {
     List<GameTrainer.SparseExample> examples = new ArrayList<>();
     for (int i = 0; i < 2; i++) examples.add(example(true, i));
@@ -66,6 +93,25 @@ class GameTrainerTest {
             "allTime ");
 
     assertEquals(0.1908, mse, 1.0e-12);
+  }
+
+  @Test
+  void pipelineSelfPlayGrowthIsIncreasingAndBounded() {
+    assertEquals(256, TrainingPipeline.progressiveValue(256, 0, 1.2, 4.0));
+    assertEquals(307, TrainingPipeline.progressiveValue(256, 1, 1.2, 4.0));
+    assertEquals(1024, TrainingPipeline.progressiveValue(256, 100, 1.2, 4.0));
+  }
+
+  @Test
+  void pgnParserKeepsEvaluationDepthAndSupportsLegacyComments() {
+    PgnGame game =
+        PgnGame.parseSingle(
+            "[Event \"test\"]\n[Result \"1-0\"]\n\n1. e4 { ev 24 depth 7 } e5 { ev 10 } 1-0");
+
+    assertEquals(24.0, game.getEvalCp()[0]);
+    assertEquals(7, game.getEvalDepth()[0]);
+    assertEquals(10.0, game.getEvalCp()[1]);
+    assertEquals(0, game.getEvalDepth()[1]);
   }
 
   @Test

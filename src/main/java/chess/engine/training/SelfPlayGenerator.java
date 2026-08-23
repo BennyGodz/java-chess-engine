@@ -10,6 +10,7 @@ import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -23,15 +24,18 @@ public final class SelfPlayGenerator {
   static final String GAMES_DIR = "games" + File.separator + "selfplay";
 
   static final int DEFAULT_GAMES = 256;
-  static final long DEFAULT_TIME_PER_MOVE_MS = 200;
+  static final long DEFAULT_TIME_PER_MOVE_MS = 400;
 
-  private static final int SEARCH_DEPTH = 7;
+  private static final int SEARCH_DEPTH = 12;
+  private static final int MIN_LABEL_DEPTH = 3;
   private static final int MAX_PLIES = 240;
-  private static final int OPENING_PLIES = 10;
+  private static final int MIN_OPENING_PLIES = 4;
+  private static final int MAX_OPENING_PLIES = 12;
 
   private static final int EVAL_COMMENT_CLAMP_CP = 900;
-  private static final int ADJUDICATION_PLY = 140;
-  private static final int ADJUDICATION_THRESHOLD_CP = 400;
+  private static final int ADJUDICATION_PLY = 100;
+  private static final int ADJUDICATION_THRESHOLD_CP = 650;
+  private static final int ADJUDICATION_STREAK = 8;
 
   private final int targetGames;
   private final long timePerMoveMs;
@@ -77,10 +81,7 @@ public final class SelfPlayGenerator {
 
     String fileName =
         String.format(
-            java.util.Locale.US,
-            "selfplay_%s_%d.pgn",
-            LocalDate.now(),
-            System.currentTimeMillis() % 1_000_000);
+            java.util.Locale.US, "selfplay_%s_%d.pgn", LocalDate.now(), System.currentTimeMillis());
     File outputFile = new File(dir, fileName);
 
     System.out.printf(
@@ -95,17 +96,22 @@ public final class SelfPlayGenerator {
     AtomicInteger losses = new AtomicInteger();
 
     OpeningBook openingBook = new OpeningBook();
-    List<List<String>> lines = openingBook.getOpenings();
+    List<List<String>> lines = new ArrayList<>(openingBook.getOpenings());
+    Collections.shuffle(lines, new Random(seed));
 
     List<Future<String>> futures = new ArrayList<>();
     for (int gameIndex = 0; gameIndex < targetGames; gameIndex++) {
       Random gameRandom = new Random(seed + gameIndex * 7919L);
-      List<String> openingLine = lines.get(gameRandom.nextInt(lines.size()));
+      List<String> openingLine = lines.get(gameIndex % lines.size());
+      int maxOpeningPlies = Math.min(MAX_OPENING_PLIES, openingLine.size());
+      int minOpeningPlies = Math.min(MIN_OPENING_PLIES, maxOpeningPlies);
+      int openingPlies =
+          minOpeningPlies + gameRandom.nextInt(maxOpeningPlies - minOpeningPlies + 1);
 
       futures.add(
           executor.submit(
               () -> {
-                String pgn = playAndRecord(openingLine);
+                String pgn = playAndRecord(openingLine, openingPlies);
                 int done = completed.incrementAndGet();
                 synchronized (System.out) {
                   System.out.printf("Game %d/%d finished.%n", done, targetGames);
@@ -139,12 +145,14 @@ public final class SelfPlayGenerator {
     return List.of(outputFile);
   }
 
-  private String playAndRecord(List<String> openingLine) {
+  private String playAndRecord(List<String> openingLine, int openingPlies) {
     SearchEngine engine = new SearchEngine();
     Board board = new Board();
     List<String> sanMoves = new ArrayList<>();
     List<Double> moveScores = new ArrayList<>();
-    int openingPlies = Math.min(openingLine.size(), OPENING_PLIES);
+    List<Integer> moveDepths = new ArrayList<>();
+    int decisiveSign = 0;
+    int decisivePlies = 0;
 
     String result;
     String termination;
@@ -164,13 +172,10 @@ public final class SelfPlayGenerator {
       }
 
       int ply = sanMoves.size();
-      if (ply >= ADJUDICATION_PLY) {
-        int materialDiff = materialCount(board, true) - materialCount(board, false);
-        if (Math.abs(materialDiff) >= ADJUDICATION_THRESHOLD_CP) {
-          result = materialDiff > 0 ? "1-0" : "0-1";
-          termination = "material adjudication";
-          break;
-        }
+      if (ply >= ADJUDICATION_PLY && decisivePlies >= ADJUDICATION_STREAK) {
+        result = decisiveSign > 0 ? "1-0" : "0-1";
+        termination = "evaluation adjudication";
+        break;
       }
       if (ply >= MAX_PLIES) {
         result = "1/2-1/2";
@@ -186,42 +191,45 @@ public final class SelfPlayGenerator {
       }
 
       moveScores.add(selected.rootScoreCp());
+      moveDepths.add(selected.depth());
       sanMoves.add(board.formatMove(selected.move()));
+      if (selected.rootScoreCp() == null) {
+        decisiveSign = 0;
+        decisivePlies = 0;
+      } else {
+        int whiteScore =
+            (int) Math.round(whiteToMove ? selected.rootScoreCp() : -selected.rootScoreCp());
+        int sign =
+            Math.abs(whiteScore) >= ADJUDICATION_THRESHOLD_CP ? Integer.signum(whiteScore) : 0;
+        if (sign != 0 && sign == decisiveSign) decisivePlies++;
+        else {
+          decisiveSign = sign;
+          decisivePlies = sign == 0 ? 0 : 1;
+        }
+      }
       board.playMove(selected.move());
     }
 
-    return toPgn(sanMoves, moveScores, result, termination);
+    return toPgn(sanMoves, moveScores, moveDepths, result, termination);
   }
 
-  private record SelectedMove(Move move, Double rootScoreCp) {}
+  private record SelectedMove(Move move, Double rootScoreCp, int depth) {}
 
   private SelectedMove selectMove(
       Board board, SearchEngine engine, int ply, List<String> openingLine, int openingPlies) {
 
     if (ply < openingPlies) {
       Move bookMove = SanMoveParser.parse(board, openingLine.get(ply));
-      if (bookMove != null) return new SelectedMove(bookMove, null);
+      if (bookMove != null) return new SelectedMove(bookMove, null, 0);
     }
 
     SearchEngine.SearchResult searchResult =
         engine.findBestMove(board, SEARCH_DEPTH, timePerMoveMs);
-    if (searchResult.bestMove() == null) return new SelectedMove(null, null);
+    if (searchResult.bestMove() == null) return new SelectedMove(null, null, searchResult.depth());
 
     int score = Math.clamp(searchResult.score(), -EVAL_COMMENT_CLAMP_CP, EVAL_COMMENT_CLAMP_CP);
-    return new SelectedMove(searchResult.bestMove(), (double) score);
-  }
-
-  private static int materialCount(Board board, boolean white) {
-    int material = 0;
-    for (int row = 0; row < 8; row++) {
-      for (int col = 0; col < 8; col++) {
-        chess.pieces.Piece piece = board.getPiece(new chess.board.Position(row, col));
-        if (piece != null && piece.isWhite() == white && !(piece instanceof chess.pieces.King)) {
-          material += piece.getValue();
-        }
-      }
-    }
-    return material;
+    Double label = searchResult.depth() >= MIN_LABEL_DEPTH ? (double) score : null;
+    return new SelectedMove(searchResult.bestMove(), label, searchResult.depth());
   }
 
   private static String resultOf(String pgn) {
@@ -232,8 +240,12 @@ public final class SelfPlayGenerator {
     return end > start ? pgn.substring(start, end) : "*";
   }
 
-  private static String toPgn(
-      List<String> sanMoves, List<Double> moveScores, String result, String termination) {
+  private String toPgn(
+      List<String> sanMoves,
+      List<Double> moveScores,
+      List<Integer> moveDepths,
+      String result,
+      String termination) {
     StringBuilder pgn = new StringBuilder();
     LocalDate now = LocalDate.now();
     String date =
@@ -250,7 +262,9 @@ public final class SelfPlayGenerator {
     pgn.append("[White \"Engine\"]\n");
     pgn.append("[Black \"Engine\"]\n");
     pgn.append("[Result \"").append(result).append("\"]\n");
-    pgn.append("[Termination \"").append(termination).append("\"]\n\n");
+    pgn.append("[Termination \"").append(termination).append("\"]\n");
+    pgn.append("[SearchDepth \"").append(SEARCH_DEPTH).append("\"]\n");
+    pgn.append("[MoveTimeMs \"").append(timePerMoveMs).append("\"]\n\n");
 
     for (int i = 0; i < sanMoves.size(); i++) {
       if (i % 2 == 0) {
@@ -258,7 +272,11 @@ public final class SelfPlayGenerator {
       }
       pgn.append(sanMoves.get(i));
       if (moveScores.get(i) != null) {
-        pgn.append(" { ev ").append(moveScores.get(i).intValue()).append(" }");
+        pgn.append(" { ev ")
+            .append(moveScores.get(i).intValue())
+            .append(" depth ")
+            .append(moveDepths.get(i))
+            .append(" }");
       }
       pgn.append(' ');
     }

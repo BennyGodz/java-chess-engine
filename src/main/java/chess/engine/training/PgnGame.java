@@ -11,19 +11,25 @@ import java.util.regex.Pattern;
 public final class PgnGame {
 
   private static final Pattern EVAL_COMMENT_PATTERN =
-      Pattern.compile("\\{\\s*ev\\s+(-?\\d+(?:\\.\\d+)?)\\s*}");
+      Pattern.compile("\\{\\s*ev\\s+(-?\\d+(?:\\.\\d+)?)(?:\\s+depth\\s+(\\d+))?\\s*}");
   private static final Pattern MOVENTEXT_TOKEN_PATTERN = Pattern.compile("\\{[^}]*\\}|\\S+");
   private final String result;
   private final List<String> sanMoves;
   private final double[] evalCp;
+  private final int[] evalDepth;
 
   private final Map<String, String> headers;
 
   private PgnGame(
-      String result, List<String> sanMoves, double[] evalCp, Map<String, String> headers) {
+      String result,
+      List<String> sanMoves,
+      double[] evalCp,
+      int[] evalDepth,
+      Map<String, String> headers) {
     this.result = result;
     this.sanMoves = sanMoves;
     this.evalCp = evalCp;
+    this.evalDepth = evalDepth;
     this.headers = headers;
   }
 
@@ -37,6 +43,10 @@ public final class PgnGame {
 
   public double[] getEvalCp() {
     return evalCp;
+  }
+
+  public int[] getEvalDepth() {
+    return evalDepth;
   }
 
   public Map<String, String> getHeaders() {
@@ -81,6 +91,7 @@ public final class PgnGame {
 
     List<String> moves = new ArrayList<>();
     List<Double> evalPerMove = new ArrayList<>();
+    List<Integer> depthPerMove = new ArrayList<>();
     Matcher tokenMatcher = MOVENTEXT_TOKEN_PATTERN.matcher(movetext);
     while (tokenMatcher.find()) {
       String token = tokenMatcher.group();
@@ -88,6 +99,8 @@ public final class PgnGame {
         Matcher eval = EVAL_COMMENT_PATTERN.matcher(token);
         if (eval.find() && !moves.isEmpty()) {
           evalPerMove.set(moves.size() - 1, Double.parseDouble(eval.group(1)));
+          depthPerMove.set(
+              moves.size() - 1, eval.group(2) == null ? 0 : Integer.parseInt(eval.group(2)));
         }
         continue;
       }
@@ -96,13 +109,18 @@ public final class PgnGame {
       if (san.isEmpty() || !looksLikeSan(san)) continue;
       moves.add(san);
       evalPerMove.add(Double.NaN);
+      depthPerMove.add(0);
     }
 
     if (moves.isEmpty()) return null;
 
     double[] evalCp = new double[moves.size()];
-    for (int i = 0; i < evalCp.length; i++) evalCp[i] = evalPerMove.get(i);
-    return new PgnGame(result, moves, evalCp, headers);
+    int[] evalDepth = new int[moves.size()];
+    for (int i = 0; i < evalCp.length; i++) {
+      evalCp[i] = evalPerMove.get(i);
+      evalDepth[i] = depthPerMove.get(i);
+    }
+    return new PgnGame(result, moves, evalCp, evalDepth, headers);
   }
 
   private static final Pattern headerPattern =
