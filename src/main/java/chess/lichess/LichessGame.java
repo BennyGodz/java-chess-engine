@@ -35,6 +35,7 @@ public class LichessGame {
   private long btimeMs;
   private long wincMs;
   private long bincMs;
+  private long initialTimeMs;
 
   public LichessGame(String token, String gameId) {
     this.token = token;
@@ -74,6 +75,11 @@ public class LichessGame {
 
     JsonNode state = event.get("state");
     updateClock(state);
+    JsonNode clock = event.get("clock");
+    initialTimeMs =
+        clock != null && clock.has("initial")
+            ? clock.get("initial").asLong()
+            : Math.max(wtimeMs, btimeMs);
 
     String initialFen = event.get("initialFen").asText();
     System.out.println("Initial FEN: " + initialFen);
@@ -135,15 +141,42 @@ public class LichessGame {
   private long calculateSearchTime() {
     long time = botIsWhite ? wtimeMs : btimeMs;
     long increment = botIsWhite ? wincMs : bincMs;
+    return calculateSearchTime(time, increment, initialTimeMs);
+  }
 
-    if (time <= 0) return 20;
+  static long calculateSearchTime(long time, long increment, long initialTime) {
+    if (time <= 0) return 1;
 
-    long reserve = Math.max(100, Math.min(1_000, time / 20));
+    long reserve = time <= 10_000 ? Math.max(100, time / 10) : Math.max(500, time / 20);
     long available = Math.max(1, time - reserve);
-    long target = time / 40 + increment * 3 / 4;
-    long maximum = time > 600_000 ? 30_000 : 5_000;
 
-    return Math.clamp(target, Math.min(20, available), Math.min(maximum, available));
+    if (time <= 2_000) return Math.min(20, available);
+    if (time <= 5_000) return Math.min(75, available);
+    if (time <= 10_000) return Math.min(200 + increment / 4, available);
+
+    long modeTime = initialTime > 0 ? initialTime : time;
+    long target;
+    long minimum;
+    long maximum;
+    if (modeTime <= 120_000) {
+      target = time / 80 + increment / 2;
+      minimum = 500;
+      maximum = 1_000;
+    } else if (modeTime <= 240_000) {
+      target = time / 50 + increment * 3 / 4;
+      minimum = 1_000;
+      maximum = 4_000;
+    } else if (modeTime <= 420_000) {
+      target = time / 45 + increment * 3 / 4;
+      minimum = 1_500;
+      maximum = 7_000;
+    } else {
+      target = time / 40 + increment * 3 / 4;
+      minimum = 2_000;
+      maximum = modeTime >= 900_000 ? 30_000 : 15_000;
+    }
+
+    return Math.clamp(target, Math.min(minimum, available), Math.min(maximum, available));
   }
 
   private void rebuildBoardFromMoves(String moves) {

@@ -1,11 +1,11 @@
 #GameTrainer cross-run state (all-time best). Delete to reset tracking.
-#Sat Aug 22 23:23:39 EDT 2026
-best.baseline.mse=0.19998197285243843
-best.games=38460
-best.timestamp=2026-08-22 23\:21\:11
-best.train.examples=516160
-best.validation.examples=20398
-best.validation.mae=0.1587516829047933
-best.validation.mse=0.054378876039282334
-last.run.best.mse=0.054378876039282334
-last.run.timestamp=2026-08-22 23\:23\:39
+#Sun Aug 23 09:57:24 EDT 2026
+best.baseline.mse=0.4595626303921543
+best.games=28674
+best.timestamp=2026-08-23 09\:56\:59
+best.train.examples=190762
+best.validation.examples=8552
+best.validation.mae=0.1261760354516351
+best.validation.mse=0.040825016635900775
+last.run.best.mse=0.040825016635900775
+last.run.timestamp=2026-08-23 09\:57\:24
