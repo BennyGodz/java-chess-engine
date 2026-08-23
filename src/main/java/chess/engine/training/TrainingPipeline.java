@@ -10,7 +10,7 @@ import java.util.Properties;
 /** Alternates self-play generation and NNUE training for a fixed duration. */
 public final class TrainingPipeline {
 
-  private static final double DEFAULT_RUNTIME_HOURS = 3.0;
+  private static final double DEFAULT_RUNTIME_HOURS = 12.0;
   private static final int DEFAULT_GAMES_PER_ITERATION = SelfPlayGenerator.DEFAULT_GAMES;
   private static final long DEFAULT_TIME_PER_MOVE_MS = SelfPlayGenerator.DEFAULT_TIME_PER_MOVE_MS;
   private static final int DEFAULT_EPOCHS = 16;

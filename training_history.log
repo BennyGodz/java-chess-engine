@@ -161,3 +161,4 @@
 2026-08-22 19:26:13 | RUN DONE  | runBest 0.0509 | evalMse 0.0286 | resultOnlyMse 0.2083 | allTime 0.0509 | baseline 0.1907 | epochs 16 | games 37641
 2026-08-22 19:36:44 | NEW BEST  | valMse 0.0499 | evalMse 0.0289 | resultOnlyMse 0.2114 | prevAllTime 0.0500 | baseline 0.1994 | trainEx 421060 | valEx 13897 | games 37897
 2026-08-22 19:38:51 | RUN DONE  | runBest 0.0499 | evalMse 0.0289 | resultOnlyMse 0.2114 | allTime 0.0499 | baseline 0.1994 | epochs 16 | games 37897
+2026-08-22 21:27:56 | RUN DONE  | runBest 0.0499 | evalMse 0.0289 | resultOnlyMse 0.2114 | allTime 0.0499 | baseline 0.1994 | epochs 60 | games 37897
