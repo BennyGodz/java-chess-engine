@@ -36,6 +36,7 @@ public class LichessGame {
   private long wincMs;
   private long bincMs;
   private long initialTimeMs;
+  private Integer previousSearchScore;
 
   public LichessGame(String token, String gameId) {
     this.token = token;
@@ -150,18 +151,20 @@ public class LichessGame {
     long reserve = time <= 10_000 ? Math.max(100, time / 10) : Math.max(500, time / 20);
     long available = Math.max(1, time - reserve);
 
-    if (time <= 2_000) return Math.min(20, available);
-    if (time <= 5_000) return Math.min(75, available);
-    if (time <= 10_000) return Math.min(200 + increment / 4, available);
+    if (time <= 500) return 1;
+    if (time <= 2_000) return Math.min(5, available);
+    if (time <= 5_000) return Math.min(20, available);
+    if (time <= 10_000) return Math.min(100 + increment / 4, available);
 
     long modeTime = initialTime > 0 ? initialTime : time;
     long target;
     long minimum;
     long maximum;
     if (modeTime <= 120_000) {
-      target = time / 80 + increment / 2;
-      minimum = 500;
-      maximum = 1_000;
+      boolean openingClock = time * 3 >= modeTime * 2;
+      target = time / (openingClock ? 45 : 60) + increment / 2;
+      minimum = openingClock ? 1_000 : 300;
+      maximum = openingClock ? 1_500 : 900;
     } else if (modeTime <= 240_000) {
       target = time / 50 + increment * 3 / 4;
       minimum = 1_000;
@@ -177,6 +180,14 @@ public class LichessGame {
     }
 
     return Math.clamp(target, Math.min(minimum, available), Math.min(maximum, available));
+  }
+
+  static long calculateCriticalExtension(long time, long baseTime, long initialTime) {
+    if (time <= 10_000) return 0;
+    long reserve = Math.max(500, time / 20);
+    long spare = Math.max(0, time - reserve - baseTime);
+    long maximum = initialTime <= 120_000 ? 750 : 2_000;
+    return Math.min(spare, Math.min(maximum, Math.max(250, baseTime / 2)));
   }
 
   private void rebuildBoardFromMoves(String moves) {
@@ -230,6 +241,17 @@ public class LichessGame {
     System.out.println("Allocated search time: " + searchTimeMs + "ms");
 
     SearchEngine.SearchResult result = engine.findBestMove(board, MAX_SEARCH_DEPTH, searchTimeMs);
+    long time = botIsWhite ? wtimeMs : btimeMs;
+    if (isCriticalPosition(result)) {
+      long extensionMs = calculateCriticalExtension(time, searchTimeMs, initialTimeMs);
+      if (extensionMs > 0) {
+        System.out.println("Critical position: extending search by " + extensionMs + "ms");
+        SearchEngine.SearchResult extended =
+            engine.findBestMove(board, MAX_SEARCH_DEPTH, extensionMs);
+        if (extended.depth() >= result.depth()) result = extended;
+      }
+    }
+    previousSearchScore = result.score();
     Move bestMove = result.bestMove();
 
     if (bestMove == null) {
@@ -242,6 +264,19 @@ public class LichessGame {
     System.out.printf("Score: %+.2f%n", result.score() / 100.0);
 
     sendMoveToLichess(bestMove);
+  }
+
+  private boolean isCriticalPosition(SearchEngine.SearchResult result) {
+    Move move = result.bestMove();
+    if (move == null) return false;
+    if (board.isInCheck(board.isWhiteToMove())
+        || move.isPromotion()
+        || move.isEnPassant()
+        || board.getPiece(move.getEnd()) != null) {
+      return true;
+    }
+    if (Math.abs(result.score()) >= SearchEngine.MATE_SCORE - 1_000) return true;
+    return previousSearchScore != null && Math.abs(result.score() - previousSearchScore) >= 120;
   }
 
   private void sendMoveToLichess(Move move) {
