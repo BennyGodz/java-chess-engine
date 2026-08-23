@@ -271,7 +271,8 @@ public final class GameTrainer {
     rejectedSelfPlayGames = 0;
     List<ReplayableGame> games = new ArrayList<>();
 
-    for (File file : pgnFiles) {
+    for (int fileIndex = 0; fileIndex < pgnFiles.size(); fileIndex++) {
+      File file = pgnFiles.get(fileIndex);
       boolean selfPlay = isSelfPlayFile(file);
       String text = Files.readString(file.toPath(), StandardCharsets.UTF_8);
       for (PgnGame pgn : PgnGame.parseAll(text)) {
@@ -288,6 +289,11 @@ public final class GameTrainer {
             new ReplayableGame(
                 pgn.getSanMoves(), pgn.getEvalCp(), pgn.getEvalDepth(), outcome, selfPlay));
       }
+      if ((fileIndex + 1) % 10 == 0 || fileIndex + 1 == pgnFiles.size()) {
+        System.out.printf(
+            "Loading PGNs: %d/%d files, %d usable games, %d self-play games rejected.%n",
+            fileIndex + 1, pgnFiles.size(), games.size(), rejectedSelfPlayGames);
+      }
     }
     return games;
   }
@@ -296,24 +302,29 @@ public final class GameTrainer {
     String termination = game.getHeaders().getOrDefault("Termination", "").toLowerCase(Locale.ROOT);
     if (termination.equals("ply limit") || termination.equals("no legal move")) return false;
 
-    Board board = new Board();
     int evaluations = 0;
     for (int ply = 0; ply < game.getSanMoves().size(); ply++) {
-      Move move = SanMoveParser.parse(board, game.getSanMoves().get(ply));
-      if (move == null) return false;
-
       if (ply >= MIN_PLY
           && game.getEvalDepth()[ply] >= MIN_SELFPLAY_EVALUATION_DEPTH
           && isUsableEvaluation(game.getEvalCp()[ply])) {
         evaluations++;
       }
-      board.playMove(move);
-      if (board.getCurrentPositionRepetitionCount() >= 3) return false;
     }
 
     int eligiblePositions = game.getSanMoves().size() - MIN_PLY;
-    return evaluations >= MIN_SELFPLAY_EVALUATIONS
-        && evaluations >= eligiblePositions * MIN_SELFPLAY_EVALUATION_COVERAGE;
+    if (evaluations < MIN_SELFPLAY_EVALUATIONS
+        || evaluations < eligiblePositions * MIN_SELFPLAY_EVALUATION_COVERAGE) {
+      return false;
+    }
+
+    Board board = new Board();
+    for (String san : game.getSanMoves()) {
+      Move move = SanMoveParser.parse(board, san);
+      if (move == null) return false;
+      board.playMove(move);
+      if (board.getCurrentPositionRepetitionCount() >= 3) return false;
+    }
+    return true;
   }
 
   private static Double whiteOutcomeOf(String result) {
