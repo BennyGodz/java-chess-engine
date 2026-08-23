@@ -1,15 +1,15 @@
 # Java Chess Engine
 
-A chess engine written in Java with a terminal interface, an NNUE evaluator, a built-in opening
-book, self-play training, PGN training, and Lichess bot integration. Chess rules, move generation,
-search, evaluation, and training are implemented in this project rather than delegated to a chess
-engine library. Jackson is used to process Lichess API events.
+A chess engine written in Java with a terminal game, an NNUE evaluator, a built-in opening book,
+self-play training, PGN training, and a Lichess bot. The chess rules, move generation, search,
+evaluation, and training code are written in this project instead of using a chess-engine library.
+Jackson is used to read messages from the Lichess API.
 
 ## Requirements
 
 - Java 21 or newer
 - The included Gradle wrapper
-- An internet connection only for dependency resolution, Lichess play, or downloading PGNs
+- An internet connection only for downloading build files or PGNs and playing on Lichess
 
 ## Build and test
 
@@ -25,8 +25,8 @@ Windows PowerShell:
 .\gradlew.bat clean test
 ```
 
-The tests cover core board behavior, the standard depth-three starting-position perft count of
-8,902 positions, short-time search fallback behavior, and NNUE training utilities.
+The tests cover the board rules, the standard count of 8,902 positions after the first three turns
+from the starting position, very short searches, and NNUE training helpers.
 
 All Java sources are formatted with the included formatter:
 
@@ -43,7 +43,7 @@ java -jar google-java-format.jar --replace $javaFiles
 
 ## Terminal game
 
-Compile the project, then start the terminal interface:
+Compile the project, then start the terminal game:
 
 ```bash
 ./gradlew classes
@@ -78,31 +78,32 @@ are constants in `chess.Main` rather than command-line options.
 
 `SearchEngine` uses:
 
-- iterative deepening with a strict time limit;
-- negamax alpha-beta search;
+- iterative deepening until the time limit is reached;
+- alpha-beta search written in negamax form;
 - principal variation search;
-- a Zobrist-keyed transposition table;
+- a transposition table indexed with Zobrist hashes;
 - null-move pruning;
-- quiescence search for captures and promotions, plus every legal evasion while in check;
-- killer moves and a history heuristic;
-- bounded check and promotion extensions; and
-- deterministic static fallback selection when the time budget expires before depth one finishes.
+- quiescence search for captures, promotions, and moves that escape check;
+- killer moves and history scores to search promising moves first;
+- small search extensions for checks and promotions; and
+- an evaluated fallback move if time runs out before depth one finishes.
 
-Search scores are centipawns from the perspective of the side to move. Checkmate scores use a large
-fixed mate value and include ply distance so faster mates are preferred.
+Search scores are measured in centipawns for the player whose turn it is. Checkmate scores include
+the number of moves to mate, so the engine prefers a faster checkmate.
 
 ## Evaluation and NNUE
 
-The evaluator combines the trained NNUE score with material, a tempo bonus, and simple king-driving
-endgame terms. The NNUE has this architecture:
+The evaluator combines the trained NNUE score with piece values, a small bonus for the player whose
+turn it is, and simple endgame rules that push a losing king toward the edge. The NNUE has this
+layout:
 
 ```text
 769 inputs -> 256 ReLU -> 256 ReLU -> 128 ReLU -> tanh output
 ```
 
-Its inputs describe piece-square placement, king location, pawn structure, king safety, castling
-rights, en passant availability, and the side to move. The network produces a side-to-move score
-scaled to centipawns.
+Its inputs describe where the pieces and kings are, the pawn structure, king safety, castling
+rights, en passant, and whose turn it is. The network returns a score in centipawns for the player
+whose turn it is.
 
 At startup, weights are loaded in this order:
 
@@ -110,14 +111,15 @@ At startup, weights are loaded in this order:
 2. `nnue_weights.bin`
 3. `nnue.weights`
 
-If none can be loaded, the NNUE becomes a deterministic zero-output network. Material and endgame
-evaluation remain active, so missing weights do not introduce random move scores.
+If none can be loaded, the NNUE returns zero. Material and endgame evaluation still work, so
+missing weights do not cause random move scores.
 
 ## Training
 
 Training is game-based. `GameTrainer` reads PGNs already under `games/`; it does not generate or
-download games. Positions are replayed, converted to sparse NNUE features, deduplicated, augmented
-by color-swapped mirroring, and split into stable training and validation sets.
+download games. The trainer replays each game and turns its positions into NNUE inputs. Duplicate
+positions are removed, positions are also mirrored with the colors swapped, and the data is split
+into fixed training and validation sets.
 
 Self-play PGNs attach a search score to each searched move:
 
@@ -125,19 +127,20 @@ Self-play PGNs attach a search score to each searched move:
 1. e4 { ev 24 depth 8 } e5 { ev 11 depth 9 }
 ```
 
-The label blends that side-to-move search evaluation with a temporally weighted game result. PGNs
-without evaluation comments remain usable at lower weight. Deeper search labels receive more
-weight, invalid legacy timeout scores are rejected, and result-only examples are limited so they
-cannot overwhelm evaluation-backed data. All non-self-play PGNs and the newest 64 self-play batches
-are used so obsolete labels from much weaker checkpoints do not dominate later training.
+Each training target combines the engine's search score with the game result. Positions closer to
+the end of a game use more of the final result. PGNs without search scores are still used, but with
+less weight. Scores from deeper searches count more, old invalid timeout scores are ignored, and
+games without search scores are limited so they cannot outweigh the better data. The trainer uses
+all non-self-play PGNs and the newest 64 self-play batches, so old scores from weaker networks do
+not outweigh newer training data.
 
-The optimizer is AdamW-style Adam with gradient clipping, dropout, learning-rate reduction,
-validation checkpoints, and early stopping. Training writes:
+The trainer uses AdamW, limits unusually large updates, uses dropout, lowers the learning rate when
+progress stalls, and stops early when validation stops improving. Training writes:
 
-- `nnue_weights.bin`: the working checkpoint;
-- `nnue_weights_best.bin`: the protected best checkpoint loaded first by the engine;
-- `training_state.txt`: cross-run best metrics; and
-- `training_history.log`: append-only training history.
+- `nnue_weights.bin`: the best network from the current run;
+- `nnue_weights_best.bin`: the best network across every run, which the engine loads first;
+- `training_state.txt`: the best saved results; and
+- `training_history.log`: a record of completed training runs.
 
 ### Generate self-play games
 
@@ -145,10 +148,10 @@ validation checkpoints, and early stopping. Training writes:
 java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator [games] [timeMs] [threads]
 ```
 
-Defaults are 256 games, 400 ms per searched move, and half the available processors. Output is
+Defaults are 256 games, 400 ms per searched move, and half the available CPU threads. Output is
 written to `games/selfplay/`. Opening moves come from the built-in book; every later move is chosen
-by search, not randomly. Opening lines are shuffled and used evenly, with a varied book-prefix
-length to create different searched positions without injecting random moves.
+by search, not randomly. Opening lines are shuffled and used evenly. The number of opening-book
+moves changes between games to create different positions without adding random moves.
 
 Example:
 
@@ -162,8 +165,8 @@ java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator 512 300
 java -cp build/classes/java/main chess.engine.training.LichessGameDownloader [gamesPerPlayer]
 ```
 
-The default is 500 games per configured player. Files are written to `games/lichess/`. This step is
-optional; any valid PGN files can be placed anywhere under `games/`.
+The default is 500 games for each player listed in the downloader. Files are written to
+`games/lichess/`. This step is optional; any valid PGN files can be placed anywhere under `games/`.
 
 ### Train existing data once
 
@@ -175,7 +178,7 @@ The default maximum is 60 epochs. The trainer stops with an error when fewer tha
 games are available. Override the input directory with `-Dgames.root=/path/to/games` before the
 class name if needed.
 
-### Run the full pipeline
+### Run the full training loop
 
 ```bash
 java -cp build/classes/java/main chess.engine.training.TrainingPipeline \
@@ -183,12 +186,12 @@ java -cp build/classes/java/main chess.engine.training.TrainingPipeline \
 ```
 
 Current defaults are 12 hours, 256 games in the first iteration, 400 ms per searched move, half the
-available processors, and at most 16 epochs per training stage. Each iteration generates fresh
-self-play games using the current checkpoint, trains the NNUE, protects the best validation
-checkpoint, and repeats until the time window expires. Games grow by 20% per iteration up to 4x the
-starting count, while move time grows by 10% up to 3x. The pipeline avoids starting a larger
-iteration when its previous iteration would not fit in the remaining window. At least 100 games per
-iteration are required.
+available CPU threads, and at most 16 epochs per training stage. Each round generates new self-play
+games using the current best network, trains the NNUE, keeps a new network only when validation
+improves, and repeats until time runs out. The number of games grows by 20% each round up to four
+times the starting count. Move time grows by 10% up to three times the starting time. The pipeline
+does not start another larger round when the previous round would not fit in the time left. At least
+100 games are required for each round.
 
 Example:
 
@@ -197,35 +200,35 @@ java -cp build/classes/java/main chess.engine.training.TrainingPipeline 8 512 30
 ```
 
 Training can improve the evaluator, but no Elo level is guaranteed. Strength depends on search
-time, hardware, training-data quality, validation quality, and the resulting checkpoint.
+time, the computer running it, the games used for training, and the saved network.
 
 ## Opening book
 
-`OpeningBook` contains prepared SAN move sequences. `OpeningManager` follows every line compatible
-with the moves played so far and deterministically chooses the highest-priority continuation. It
-leaves book mode when the game moves outside known theory.
+`OpeningBook` contains a list of opening lines written in SAN. `OpeningManager` tracks every line
+that matches the game so far and always chooses the highest-priority next move. It stops using the
+book when the game leaves those saved openings.
 
-The terminal interface also compares a proposed book move with a short normal search and rejects
+The terminal game also compares a proposed book move with a short normal search and rejects
 the book move when it is more than 50 centipawns worse. After book play ends, all engine moves come
 from `SearchEngine`.
 
 ## Chess rules and notation
 
-The board implementation supports:
+The engine supports:
 
 - legal moves and captures for all six piece types;
 - check, checkmate, stalemate, pins, and self-check prevention;
 - castling, en passant, and all four promotion choices;
-- SAN parsing, formatting, and disambiguation;
+- reading and writing SAN, including moves where two matching pieces could use the same square;
 - FEN loading and generation;
-- claimable 50-move and threefold-repetition draws;
-- automatic 75-move and fivefold-repetition draws; and
-- insufficient-material detection.
+- 50-move and threefold-repetition draws that a player can claim;
+- automatic draws after 75 moves or five repetitions; and
+- draws when neither side has enough pieces to checkmate.
 
 ## Lichess bot
 
-`LichessBot` accepts challenges, streams games, reconstructs boards from UCI moves, searches, and
-submits moves through the Lichess Bot API. Set a bot-account token before launching it:
+`LichessBot` accepts challenges, follows live games, rebuilds the board from UCI moves, searches,
+and sends moves through the Lichess Bot API. Set a bot-account token before starting it:
 
 macOS/Linux:
 
@@ -239,10 +242,9 @@ Windows PowerShell:
 $env:LICHESS_TOKEN = "your-token"
 ```
 
-Run `chess.lichess.LichessBot.main()` from IntelliJ IDEA or another launcher that uses the Gradle
-runtime classpath, because the Lichess classes require Jackson. The bot ID used for color detection
-is currently returned by `LichessGame.getMyBotId()` as `bugabot`; update that method when using a
-different Lichess bot account.
+Run `chess.lichess.LichessBot.main()` from IntelliJ IDEA or another launcher that includes the
+Gradle dependencies because the Lichess code needs Jackson. `LichessGame.getMyBotId()` currently
+returns `bugabot`; change that method when using a different Lichess bot account.
 
 ## Project structure
 
@@ -276,21 +278,61 @@ src
     └── engine
 ```
 
-Generated PGNs, NNUE checkpoints, and local build output are excluded from Git.
+Generated PGNs, saved NNUE files, and local build output are excluded from Git.
+
+## References and further reading
+
+The code was written for this project. These resources helped explain some of the ideas and tools
+used while developing it.
+
+### Chess-engine concepts
+
+- [Alpha-Beta Pruning in Adversarial Search Algorithms](https://www.geeksforgeeks.org/artificial-intelligence/alpha-beta-pruning-in-adversarial-search-algorithms/)
+  gives an introductory explanation of alpha-beta search.
+- Sebastian Lague's [Coding Adventure: Chess](https://www.youtube.com/watch?v=U4ogK0MIzqk)
+  shows move generation, testing, search, evaluation, transposition tables, and openings.
+- His follow-up,
+  [Coding Adventure: Making a Better Chess Bot](https://www.youtube.com/watch?v=_vqlIPDR2TU),
+  covers stronger move selection, search extensions, bitboards, faster move generation,
+  killer moves, reductions, repetition handling, and connecting a bot to Lichess.
+- [Implementing Quiescence Search](https://www.youtube.com/watch?v=WzEhVjdNByg) explains why the
+  engine continues checking captures in unstable positions instead of stopping too early.
+- The [Chess Programming Wiki: Quiescence Search](https://chessprogramming.org/Quiescence_Search)
+  page provides more details and example code.
+- [Magic Bitboards](https://chessprogramming.org/Magic_Bitboards) is further reading for a possible
+  future way to generate bishop, rook, and queen moves faster. This engine does not currently use
+  bitboards or magic bitboards.
+
+### NNUE and computer-chess projects
+
+- The [Stockfish project](https://github.com/official-stockfish/Stockfish) is a leading open-source
+  chess engine and a useful example of modern engine design and testing.
+- Stockfish's
+  [NNUE technical documentation](https://github.com/official-stockfish/nnue-pytorch/blob/master/docs/nnue.md)
+  explains how an NNUE reads positions, is trained, and evaluates positions quickly.
+
+### API and project tooling
+
+- The [official Lichess API specification](https://github.com/lichess-org/api/blob/master/doc/specs/lichess-api.yaml)
+  documents event streams, challenges, game streams, PGN downloads, and bot move submission.
+- The [Gradle Wrapper documentation](https://docs.gradle.org/current/userguide/wrapper_plugin.html)
+  explains how the included scripts use the same Gradle version on every computer.
+- The [google-java-format project](https://github.com/google/google-java-format) is the formatter
+  used for all Java source files.
 
 ## Known limitations
 
 - Search is single-threaded within one game; self-play parallelism runs independent games.
 - There are no endgame tablebases, bitboards, or magic-bitboard move generation.
-- The opening book is a built-in list rather than a Polyglot database.
+- The opening book is a built-in list rather than a full opening database.
 - NNUE training uses the engine's own search evaluations rather than an external teacher.
 - Lichess color detection currently assumes the bot account is named `bugabot`.
 
-## AI-use disclosure
+## Use of AI tools
 
-AI tools were used as learning and development aids to understand chess-engine concepts, explore
-implementation approaches, troubleshoot problems, refactor code, and improve documentation. The
-generated suggestions were reviewed, adapted, and tested as part of developing this project.
+AI tools were used to help learn chess-engine ideas, compare ways to implement features, find bugs,
+clean up code, and improve the documentation. Suggestions were reviewed, changed when needed, and
+tested before they were used.
 
 ## Author
 
