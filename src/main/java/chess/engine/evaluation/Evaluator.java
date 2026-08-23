@@ -160,6 +160,18 @@ public class Evaluator {
         score += evaluateCentralPawnDevelopment(board, true, phase);
         score += evaluateCentralPawnDevelopment(board, false, phase);
 
+        /* Long-term features that remain important after the opening book ends. */
+        score += evaluateBishopPair(board, true);
+        score += evaluateBishopPair(board, false);
+        score += evaluateRookActivity(board, true);
+        score += evaluateRookActivity(board, false);
+        score += evaluatePawnStructure(board, true, phase);
+        score += evaluatePawnStructure(board, false, phase);
+        score += evaluateMiddlegameKingSafety(board, true, phase);
+        score += evaluateMiddlegameKingSafety(board, false, phase);
+        score += evaluateEndgameKingActivity(board, true, phase);
+        score += evaluateEndgameKingActivity(board, false, phase);
+
         return score;
     }
 
@@ -271,7 +283,8 @@ public class Evaluator {
          *
          * Both sides still have most minor pieces undeveloped.
          */
-        if (whiteMinor <= 2
+        if (board.getFullmoveNumber() <= 16
+                && whiteMinor <= 2
                 && blackMinor <= 2
                 && queens >= 2) {
 
@@ -870,9 +883,11 @@ public class Evaluator {
             int shieldRow =
                     isWhite ? 6 : 1;
 
+            int firstShieldColumn = kingCol <= 3 ? 0 : 5;
+            int lastShieldColumn = kingCol <= 3 ? 2 : 7;
             int missingShieldPawns = 0;
 
-            for (int col = 5; col <= 7; col++) {
+            for (int col = firstShieldColumn; col <= lastShieldColumn; col++) {
 
                 Piece pawn =
                         board.getPiece(
@@ -892,12 +907,179 @@ public class Evaluator {
             int penalty =
                     missingShieldPawns * 12;
 
-            score += isWhite
-                    ? -penalty
-                    : penalty;
+            score -= penalty;
         }
 
         return isWhite ? score : -score;
+    }
+
+    private int evaluateBishopPair(Board board, boolean isWhite) {
+        int bishops = 0;
+        for (int row = 0; row < 8; row++) {
+            for (int column = 0; column < 8; column++) {
+                Piece piece = board.getPiece(new Position(row, column));
+                if (piece instanceof Bishop && piece.isWhite() == isWhite) bishops++;
+            }
+        }
+
+        int score = bishops >= 2 ? 30 : 0;
+        return isWhite ? score : -score;
+    }
+
+    private int evaluateRookActivity(Board board, boolean isWhite) {
+        int score = 0;
+
+        for (int row = 0; row < 8; row++) {
+            for (int column = 0; column < 8; column++) {
+                Piece piece = board.getPiece(new Position(row, column));
+                if (!(piece instanceof Rook) || piece.isWhite() != isWhite) continue;
+
+                boolean friendlyPawn = false;
+                boolean enemyPawn = false;
+                for (int pawnRow = 0; pawnRow < 8; pawnRow++) {
+                    Piece filePiece = board.getPiece(new Position(pawnRow, column));
+                    if (!(filePiece instanceof Pawn)) continue;
+                    if (filePiece.isWhite() == isWhite) friendlyPawn = true;
+                    else enemyPawn = true;
+                }
+
+                if (!friendlyPawn && !enemyPawn) score += 18;
+                else if (!friendlyPawn) score += 10;
+
+                if ((isWhite && row == 1) || (!isWhite && row == 6)) score += 20;
+            }
+        }
+
+        return isWhite ? score : -score;
+    }
+
+    private int evaluatePawnStructure(Board board, boolean isWhite, int phase) {
+        int[] pawnsPerFile = new int[8];
+        int score = 0;
+
+        for (int row = 0; row < 8; row++) {
+            for (int column = 0; column < 8; column++) {
+                Piece piece = board.getPiece(new Position(row, column));
+                if (piece instanceof Pawn && piece.isWhite() == isWhite) {
+                    pawnsPerFile[column]++;
+                }
+            }
+        }
+
+        for (int count : pawnsPerFile) {
+            if (count > 1) score -= (count - 1) * 14;
+        }
+
+        for (int row = 0; row < 8; row++) {
+            for (int column = 0; column < 8; column++) {
+                Piece piece = board.getPiece(new Position(row, column));
+                if (!(piece instanceof Pawn) || piece.isWhite() != isWhite) continue;
+
+                boolean leftNeighbor = column > 0 && pawnsPerFile[column - 1] > 0;
+                boolean rightNeighbor = column < 7 && pawnsPerFile[column + 1] > 0;
+                if (!leftNeighbor && !rightNeighbor) score -= 12;
+
+                if (isPassedPawn(board, row, column, isWhite)) {
+                    int advancement = isWhite ? 6 - row : row - 1;
+                    int bonus = switch (Math.max(0, Math.min(5, advancement))) {
+                        case 0 -> 5;
+                        case 1 -> 10;
+                        case 2 -> 20;
+                        case 3 -> 35;
+                        case 4 -> 60;
+                        default -> 100;
+                    };
+                    score += phase == 2 ? bonus * 3 / 2 : bonus;
+                }
+            }
+        }
+
+        return isWhite ? score : -score;
+    }
+
+    private boolean isPassedPawn(
+            Board board,
+            int row,
+            int column,
+            boolean isWhite
+    ) {
+        int direction = isWhite ? -1 : 1;
+
+        for (int targetRow = row + direction;
+             targetRow >= 0 && targetRow < 8;
+             targetRow += direction) {
+            for (int targetColumn = Math.max(0, column - 1);
+                 targetColumn <= Math.min(7, column + 1);
+                 targetColumn++) {
+                Piece piece = board.getPiece(new Position(targetRow, targetColumn));
+                if (piece instanceof Pawn && piece.isWhite() != isWhite) return false;
+            }
+        }
+
+        return true;
+    }
+
+    private int evaluateMiddlegameKingSafety(Board board, boolean isWhite, int phase) {
+        if (phase != 1) return 0;
+
+        Position king = findKing(board, isWhite);
+        if (king == null) return 0;
+
+        int score = 0;
+        int shieldRow = king.getRow() + (isWhite ? -1 : 1);
+        if (shieldRow >= 0 && shieldRow < 8) {
+            for (int column = Math.max(0, king.getColumn() - 1);
+                 column <= Math.min(7, king.getColumn() + 1);
+                 column++) {
+                Piece piece = board.getPiece(new Position(shieldRow, column));
+                if (piece instanceof Pawn && piece.isWhite() == isWhite) score += 8;
+                else score -= 5;
+            }
+        }
+
+        int attackedRingSquares = 0;
+        for (int row = Math.max(0, king.getRow() - 1);
+             row <= Math.min(7, king.getRow() + 1);
+             row++) {
+            for (int column = Math.max(0, king.getColumn() - 1);
+                 column <= Math.min(7, king.getColumn() + 1);
+                 column++) {
+                if (board.isSquareAttacked(new Position(row, column), !isWhite)) {
+                    attackedRingSquares++;
+                }
+            }
+        }
+        score -= attackedRingSquares * 8;
+
+        if (king.getColumn() >= 3 && king.getColumn() <= 4) score -= 12;
+        return isWhite ? score : -score;
+    }
+
+    private int evaluateEndgameKingActivity(Board board, boolean isWhite, int phase) {
+        if (phase != 2) return 0;
+
+        Position king = findKing(board, isWhite);
+        if (king == null) return 0;
+
+        int rowDistance = Math.min(Math.abs(king.getRow() - 3), Math.abs(king.getRow() - 4));
+        int columnDistance = Math.min(
+                Math.abs(king.getColumn() - 3),
+                Math.abs(king.getColumn() - 4)
+        );
+        int score = 28 - (rowDistance + columnDistance) * 7;
+        return isWhite ? score : -score;
+    }
+
+    private Position findKing(Board board, boolean isWhite) {
+        for (int row = 0; row < 8; row++) {
+            for (int column = 0; column < 8; column++) {
+                Piece piece = board.getPiece(new Position(row, column));
+                if (piece instanceof King && piece.isWhite() == isWhite) {
+                    return new Position(row, column);
+                }
+            }
+        }
+        return null;
     }
 
     /**
