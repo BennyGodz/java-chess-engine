@@ -1,228 +1,343 @@
 # Java Chess Engine
 
-A chess engine written entirely in Java with support for a terminal interface, an opening book, and direct Lichess integration.
+A chess engine written in Java with a terminal game, an NNUE evaluator, a built-in opening book,
+self-play training, PGN training, and a Lichess bot. The chess rules, move generation, search,
+evaluation, and training code are written in this project instead of using a chess-engine library.
+Jackson is used to read messages from the Lichess API.
 
-The project was built from scratch without relying on external chess libraries. Every major component, including move generation, rule enforcement, search, evaluation, and communication with the Lichess API, was implemented manually.
+## Requirements
 
-## Features
+- Java 21 or newer
+- The included Gradle wrapper
+- An internet connection only for downloading build files or PGNs and playing on Lichess
 
-### Search
+## Build and test
 
-The engine uses several search techniques to improve move quality and reduce the number of positions that must be evaluated.
-
-- Minimax search
-- Alpha-beta pruning
-- Quiescence search
-- Move ordering
-- Time controlled search
-- Depth limited search
-
-### Evaluation
-
-The evaluation function combines material and positional factors.
-
-- Material evaluation
-- Piece-square tables
-- Center control
-- Piece activity
-- Development bonuses
-- Reduced early queen movement
-- Reduced early knight overdevelopment
-
-### Opening Book
-
-The engine includes an opening book that selects a prepared opening at the beginning of each game.
-
-- Random opening selection
-- Multiple opening variations
-- Automatic synchronization with terminal games
-- Automatic synchronization with Lichess games
-- Fallback to normal search if the opponent deviates from the selected line
-- Tactical verification before playing a book move
-
-### Terminal Interface
-
-The terminal version supports both Standard Algebraic Notation and coordinate notation.
-
-## Input
-
-The engine accepts Standard Algebraic Notation (SAN), including:
-
-- `e4`
-- `Nf3`
-- `Nbd2`
-- `Nfd2`
-- `R1e2`
-- `R8e2`
-- `Raxe2`
-- `Bxe6+`
-- `Qh7#`
-- `O-O`
-- `O-O-O`
-- `e8=Q`
-- `e8=R`
-- `e8=B`
-- `e8=N`
-
-Coordinate notation is also accepted:
-
-- `e2e4`
-- `e2-e4`
-- `e2 e4`
-- `e7e8Q`
-
-## Implemented Chess Rules
-
-- All six piece types
-- Legal move generation
-- Legal captures
-- Check detection
-- Checkmate detection
-- Stalemate detection
-- Castling
-- En passant
-- Promotion
-- Pinned pieces
-- Self-check prevention
-- SAN generation
-- SAN parsing
-- SAN disambiguation
-- Threefold repetition
-- Fivefold repetition
-- Fifty-move rule
-- Seventy-five-move rule
-- Insufficient material detection
-- FEN generation
-- FEN loading
-- Legal move listing
-
-## Lichess Integration
-
-The engine can connect directly to a Lichess bot account.
-
-Supported features include:
-
-- Challenge acceptance
-- Real time game streaming
-- Automatic board reconstruction
-- UCI move conversion
-- Automatic move submission
-- Bot play in blitz games
-- Opening book support during online games
-
-## Project Structure
-
-```text
-src/main/java/chess
-├── Main.java
-├── board
-│   ├── Board.java
-│   ├── Move.java
-│   └── Position.java
-├── pieces
-│   ├── Bishop.java
-│   ├── King.java
-│   ├── Knight.java
-│   ├── Pawn.java
-│   ├── Queen.java
-│   └── Rook.java
-├── engine
-│   ├── ChessEngine.java
-│   ├── evaluation
-│   ├── opening
-│   └── search
-└── lichess
-    ├── LichessBot.java
-    ├── LichessClient.java
-    └── LichessGame.java
-```
-
-## Commands
-
-- `moves` — list all legal moves in SAN
-- `fen` — print the current FEN
-- `eval` — run the search engine and display the current evaluation
-- `claim50` — claim a 50-move draw
-- `claim3` — claim a threefold repetition draw
-- `help` — print help information
-- `quit` — exit the program
-
-## Search Algorithm
-
-### Minimax
-
-The engine assumes that both players will choose the strongest available move.
-
-### Alpha-Beta Pruning
-
-Alpha-beta pruning eliminates branches that cannot improve the current position.
-
-Benefits include:
-
-- Faster searches
-- Fewer evaluated positions
-- Greater search depth
-
-### Quiescence Search
-
-Quiescence search extends the search beyond the normal depth limit during tactical positions.
-
-This reduces the horizon effect and improves tactical accuracy.
-
-## Future Improvements
-
-- Iterative deepening
-- Transposition tables
-- Zobrist hashing
-- Magic bitboards
-- Null move pruning
-- Late move reductions
-- Endgame tablebases
-- Parallel search
-
-## Build
-
-The project uses Gradle.
-
-Build the project:
+macOS/Linux:
 
 ```bash
-./gradlew build
+./gradlew clean test
 ```
 
-Run the terminal version:
+Windows PowerShell:
+
+```powershell
+.\gradlew.bat clean test
+```
+
+The tests cover the board rules, the standard count of 8,902 positions after the first three turns
+from the starting position, very short searches, and NNUE training helpers.
+
+All Java sources are formatted with the included formatter:
 
 ```bash
-./gradlew run
+java -jar google-java-format.jar --replace $(find src -name "*.java")
 ```
 
-The source can also be compiled directly with `javac`.
+In PowerShell:
 
-## Example
+```powershell
+$javaFiles = @(Get-ChildItem src -Recurse -Filter *.java | ForEach-Object FullName)
+java -jar google-java-format.jar --replace $javaFiles
+```
+
+## Terminal game
+
+Compile the project, then start the terminal game:
+
+```bash
+./gradlew classes
+java -cp build/classes/java/main chess.Main
+```
+
+On Windows, use `.\gradlew.bat classes` for the first command. The program asks whether you want
+to play White or Black.
+
+Accepted move formats include SAN and coordinate notation:
 
 ```text
-================================
-        JAVA CHESS ENGINE
-================================
-
-You are playing White.
-
-8 r n b q k b n r
-7 p p p p p p p p
-6 . . . . . . . .
-5 . . . . . . . .
-4 . . . . P . . .
-3 . . . . . . . .
-2 P P P P . P P P
-1 R N B Q K B N R
-  a b c d e f g h
-
-Move 1: In progress
-
-Engine is thinking...
-
-Engine plays Nf6 [depth 9, nodes 245,318]
+e4       Nf3      Nbd2     R1e2
+Bxe6+    O-O      O-O-O    e8=Q
+e2e4     e2 e4    e7e8Q
 ```
+
+Terminal commands:
+
+- `moves` lists every legal move in SAN.
+- `fen` prints the current FEN.
+- `eval` searches the current position for one second.
+- `claim50` claims a draw when the 50-move rule applies.
+- `claim3` claims a draw after threefold repetition.
+- `help` displays command help.
+- `quit` exits the game.
+
+The terminal engine searches to a maximum depth of 9 with a one-second move budget. Those defaults
+are constants in `chess.Main` rather than command-line options.
+
+## Search
+
+`SearchEngine` uses:
+
+- iterative deepening until the time limit is reached;
+- alpha-beta search written in negamax form;
+- principal variation search;
+- a transposition table indexed with Zobrist hashes;
+- null-move pruning;
+- quiescence search for captures, promotions, and moves that escape check;
+- killer moves and history scores to search promising moves first;
+- small search extensions for checks and promotions; and
+- an evaluated fallback move if time runs out before depth one finishes.
+
+Search scores are measured in centipawns for the player whose turn it is. Checkmate scores include
+the number of moves to mate, so the engine prefers a faster checkmate.
+
+## Evaluation and NNUE
+
+The evaluator combines the trained NNUE score with piece values, a small bonus for the player whose
+turn it is, and simple endgame rules that push a losing king toward the edge. The NNUE has this
+layout:
+
+```text
+769 inputs -> 256 ReLU -> 256 ReLU -> 128 ReLU -> tanh output
+```
+
+Its inputs describe where the pieces and kings are, the pawn structure, king safety, castling
+rights, en passant, and whose turn it is. The network returns a score in centipawns for the player
+whose turn it is.
+
+At startup, weights are loaded in this order:
+
+1. `nnue_weights_best.bin`
+2. `nnue_weights.bin`
+3. `nnue.weights`
+
+If none can be loaded, the NNUE returns zero. Material and endgame evaluation still work, so
+missing weights do not cause random move scores.
+
+## Training
+
+Training is game-based. `GameTrainer` reads PGNs already under `games/`; it does not generate or
+download games. The trainer replays each game and turns its positions into NNUE inputs. Duplicate
+positions are removed, positions are also mirrored with the colors swapped, and the data is split
+deterministically into training and validation sets.
+
+Self-play PGNs attach a search score to each searched move:
+
+```text
+1. e4 { ev 24 depth 8 } e5 { ev 11 depth 9 }
+```
+
+Each training target combines the engine's search score with the game result. Positions closer to
+the end of a game use more of the final result. PGNs without search scores are still used, but with
+less weight. Self-play scores are used only when search completed depth 4 or deeper. Invalid,
+looping, truncated, and sparsely labeled self-play games are rejected. Result-only positions are
+limited to one for every four evaluated positions and draws receive very little weight. Validation
+uses evaluated positions when they are available, so noisy game results cannot select the best
+checkpoint. The trainer uses all non-self-play PGNs and the newest 64 self-play batches, so old
+scores from weaker networks do not outweigh newer training data.
+
+The trainer uses AdamW, limits unusually large updates, uses dropout, lowers the learning rate when
+progress stalls, and stops early when validation stops improving. Training writes:
+
+- `nnue_weights.bin`: the best network from the current run;
+- `nnue_weights_best.bin`: the best network across every run, which the engine loads first;
+- `training_state.txt`: the best saved results; and
+- `training_history.log`: a record of completed training runs.
+
+### Generate self-play games
+
+```bash
+java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator [games] [timeMs] [threads]
+```
+
+Defaults are 256 games, 400 ms per searched move, and half the available CPU threads. Output is
+written to `games/selfplay/`. Opening moves come from the built-in book; every later move is chosen
+by search, not randomly. Opening lines are shuffled and used evenly. The number of opening-book
+moves changes between games to create different positions without adding random moves. Games that
+repeat three times, hit a move limit, contain an invalid move, or lack enough depth-4 labels are
+discarded instead of being written. Self-play also stops at claimable threefold and 50-move draws.
+
+Example:
+
+```bash
+java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator 512 800 8
+```
+
+### Download Lichess PGNs
+
+```bash
+java -cp build/classes/java/main chess.engine.training.LichessGameDownloader [gamesPerPlayer]
+```
+
+The default is 500 games for each player listed in the downloader. Files are written to
+`games/lichess/`. This step is optional; any valid PGN files can be placed anywhere under `games/`.
+
+### Train existing data once
+
+```bash
+java -cp build/classes/java/main chess.engine.training.GameTrainer [epochs]
+```
+
+The default maximum is 60 epochs. The trainer stops with an error when fewer than eight usable
+games are available. Override the input directory with `-Dgames.root=/path/to/games` before the
+class name if needed.
+
+### Run the full training loop
+
+```bash
+java -cp build/classes/java/main chess.engine.training.TrainingPipeline \
+  [hours] [gamesPerIteration] [timeMs] [threads] [epochs]
+```
+
+Current defaults are 12 hours, 256 games in the first iteration, 400 ms per searched move, half the
+available CPU threads, and at most 16 epochs per training stage. Each round generates new self-play
+games using the current best network, trains the NNUE, keeps a new network only when validation
+improves, and repeats until time runs out. The game count is the number attempted; only games that
+pass the quality checks are retained. The number of games grows by 20% each round up to four times
+the starting count. Move time grows by 10% up to three times the starting time. The pipeline does
+not start another larger round when the previous round would not fit in the time left. At least 100
+games are required for each round.
+
+Example:
+
+```bash
+java -cp build/classes/java/main chess.engine.training.TrainingPipeline 8 512 800 8 16
+```
+
+Training can improve the evaluator, but no Elo level is guaranteed. Strength depends on search
+time, the computer running it, the games used for training, and the saved network.
+
+## Opening book
+
+`OpeningBook` contains a list of opening lines written in SAN. `OpeningManager` tracks every line
+that matches the game so far and always chooses the highest-priority next move. It stops using the
+book when the game leaves those saved openings.
+
+The terminal game also compares a proposed book move with a short normal search and rejects
+the book move when it is more than 50 centipawns worse. After book play ends, all engine moves come
+from `SearchEngine`.
+
+## Chess rules and notation
+
+The engine supports:
+
+- legal moves and captures for all six piece types;
+- check, checkmate, stalemate, pins, and self-check prevention;
+- castling, en passant, and all four promotion choices;
+- reading and writing SAN, including moves where two matching pieces could use the same square;
+- FEN loading and generation;
+- 50-move and threefold-repetition draws that a player can claim;
+- automatic draws after 75 moves or five repetitions; and
+- draws when neither side has enough pieces to checkmate.
+
+## Lichess bot
+
+`LichessBot` accepts challenges, follows live games, rebuilds the board from UCI moves, searches,
+and sends moves through the Lichess Bot API. Set a bot-account token before starting it:
+
+macOS/Linux:
+
+```bash
+export LICHESS_TOKEN="your-token"
+```
+
+Windows PowerShell:
+
+```powershell
+$env:LICHESS_TOKEN = "your-token"
+```
+
+Run `chess.lichess.LichessBot.main()` from IntelliJ IDEA or another launcher that includes the
+Gradle dependencies because the Lichess code needs Jackson. `LichessGame.getMyBotId()` currently
+returns `bugabot`; change that method when using a different Lichess bot account.
+
+## Project structure
+
+```text
+src
+├── main/java/chess
+│   ├── Main.java
+│   ├── board
+│   │   ├── Board.java
+│   │   ├── Move.java
+│   │   └── Position.java
+│   ├── pieces
+│   │   ├── Piece.java
+│   │   ├── Pawn.java
+│   │   ├── Knight.java
+│   │   ├── Bishop.java
+│   │   ├── Rook.java
+│   │   ├── Queen.java
+│   │   └── King.java
+│   ├── engine
+│   │   ├── MoveGenerator.java
+│   │   ├── evaluation
+│   │   │   ├── Evaluator.java
+│   │   │   └── nnue
+│   │   ├── opening
+│   │   ├── search
+│   │   └── training
+│   └── lichess
+└── test/java/chess
+    ├── board
+    └── engine
+```
+
+Generated PGNs, saved NNUE files, and local build output are excluded from Git.
+
+## References and further reading
+
+The code was written for this project. These resources helped explain some of the ideas and tools
+used while developing it.
+
+### Chess-engine concepts
+
+- [Alpha-Beta Pruning in Adversarial Search Algorithms](https://www.geeksforgeeks.org/artificial-intelligence/alpha-beta-pruning-in-adversarial-search-algorithms/)
+  gives an introductory explanation of alpha-beta search.
+- Sebastian Lague's [Coding Adventure: Chess](https://www.youtube.com/watch?v=U4ogK0MIzqk)
+  shows move generation, testing, search, evaluation, transposition tables, and openings.
+- His follow-up,
+  [Coding Adventure: Making a Better Chess Bot](https://www.youtube.com/watch?v=_vqlIPDR2TU),
+  covers stronger move selection, search extensions, bitboards, faster move generation,
+  killer moves, reductions, repetition handling, and connecting a bot to Lichess.
+- [Implementing Quiescence Search](https://www.youtube.com/watch?v=WzEhVjdNByg) explains why the
+  engine continues checking captures in unstable positions instead of stopping too early.
+- The [Chess Programming Wiki: Quiescence Search](https://chessprogramming.org/Quiescence_Search)
+  page provides more details and example code.
+- [Magic Bitboards](https://chessprogramming.org/Magic_Bitboards) is further reading for a possible
+  future way to generate bishop, rook, and queen moves faster. This engine does not currently use
+  bitboards or magic bitboards.
+
+### NNUE and computer-chess projects
+
+- The [Stockfish project](https://github.com/official-stockfish/Stockfish) is a leading open-source
+  chess engine and a useful example of modern engine design and testing.
+- Stockfish's
+  [NNUE technical documentation](https://github.com/official-stockfish/nnue-pytorch/blob/master/docs/nnue.md)
+  explains how an NNUE reads positions, is trained, and evaluates positions quickly.
+
+### API and project tooling
+
+- The [official Lichess API specification](https://github.com/lichess-org/api/blob/master/doc/specs/lichess-api.yaml)
+  documents event streams, challenges, game streams, PGN downloads, and bot move submission.
+- The [Gradle Wrapper documentation](https://docs.gradle.org/current/userguide/wrapper_plugin.html)
+  explains how the included scripts use the same Gradle version on every computer.
+- The [google-java-format project](https://github.com/google/google-java-format) is the formatter
+  used for all Java source files.
+
+## Known limitations
+
+- Search is single-threaded within one game; self-play parallelism runs independent games.
+- There are no endgame tablebases, bitboards, or magic-bitboard move generation.
+- The opening book is a built-in list rather than a full opening database.
+- NNUE training uses the engine's own search evaluations rather than an external teacher.
+- Lichess color detection currently assumes the bot account is named `bugabot`.
+
+## Use of AI tools
+
+AI tools were used to help learn chess-engine ideas, compare ways to implement features, find bugs,
+clean up code, and improve the documentation. Suggestions were reviewed, changed when needed, and
+tested before they were used.
 
 ## Author
 

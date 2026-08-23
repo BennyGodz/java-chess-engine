@@ -1,0 +1,248 @@
+2026-08-21 18:25:50 | NEW BEST  | valMse 0.8600 | prevAllTime none yet | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:25:53 | NEW BEST  | valMse 0.8556 | prevAllTime 0.8600 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:25:56 | NEW BEST  | valMse 0.8514 | prevAllTime 0.8556 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:26:00 | NEW BEST  | valMse 0.8501 | prevAllTime 0.8514 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:26:03 | NEW BEST  | valMse 0.8496 | prevAllTime 0.8501 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:26:06 | NEW BEST  | valMse 0.8488 | prevAllTime 0.8496 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:26:09 | NEW BEST  | valMse 0.8477 | prevAllTime 0.8488 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:26:12 | NEW BEST  | valMse 0.8473 | prevAllTime 0.8477 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:26:15 | NEW BEST  | valMse 0.8472 | prevAllTime 0.8473 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:26:18 | NEW BEST  | valMse 0.8463 | prevAllTime 0.8472 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:26:27 | NEW BEST  | valMse 0.8460 | prevAllTime 0.8463 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:26:30 | NEW BEST  | valMse 0.8443 | prevAllTime 0.8460 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:26:34 | NEW BEST  | valMse 0.8435 | prevAllTime 0.8443 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:27:50 | NEW BEST  | valMse 0.8413 | prevAllTime 0.8435 | baseline 0.8503 | trainEx 3000000 | valEx 170741 | games 29521
+2026-08-21 18:33:15 | RUN DONE  | runBest 0.8413 | allTime 0.8413 | baseline 0.8503 | epochs 60 | games 29521
+2026-08-21 20:13:02 | NEW BEST  | valMse 0.0998 | prevAllTime 0.1097 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:13:12 | NEW BEST  | valMse 0.0982 | prevAllTime 0.0998 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:13:21 | NEW BEST  | valMse 0.0981 | prevAllTime 0.0982 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:24:49 | RUN DONE  | runBest 0.0981 | allTime 0.0981 | baseline 0.0980 | epochs 60 | games 29521
+2026-08-21 20:38:54 | NEW BEST  | valMse 0.0980 | prevAllTime 0.0981 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:38:59 | NEW BEST  | valMse 0.0978 | prevAllTime 0.0980 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:39:05 | NEW BEST  | valMse 0.0974 | prevAllTime 0.0978 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:39:10 | NEW BEST  | valMse 0.0963 | prevAllTime 0.0974 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:39:15 | NEW BEST  | valMse 0.0954 | prevAllTime 0.0963 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:39:21 | NEW BEST  | valMse 0.0941 | prevAllTime 0.0954 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:39:26 | NEW BEST  | valMse 0.0933 | prevAllTime 0.0941 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:39:30 | NEW BEST  | valMse 0.0928 | prevAllTime 0.0933 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:39:35 | NEW BEST  | valMse 0.0922 | prevAllTime 0.0928 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:39:45 | NEW BEST  | valMse 0.0914 | prevAllTime 0.0922 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:39:50 | NEW BEST  | valMse 0.0910 | prevAllTime 0.0914 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:39:58 | NEW BEST  | valMse 0.0909 | prevAllTime 0.0910 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:40:14 | NEW BEST  | valMse 0.0905 | prevAllTime 0.0909 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:40:17 | NEW BEST  | valMse 0.0904 | prevAllTime 0.0905 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:40:20 | NEW BEST  | valMse 0.0903 | prevAllTime 0.0904 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:40:24 | NEW BEST  | valMse 0.0899 | prevAllTime 0.0903 | baseline 0.0980 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 20:50:36 | RUN DONE  | runBest 0.0899 | allTime 0.0899 | baseline 0.0980 | epochs 60 | games 29521
+2026-08-21 21:37:51 | NEW BEST  | valMse 0.5092 | prevAllTime 0.5183 | baseline 0.5511 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 21:37:58 | NEW BEST  | valMse 0.5073 | prevAllTime 0.5092 | baseline 0.5511 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 21:38:14 | NEW BEST  | valMse 0.5068 | prevAllTime 0.5073 | baseline 0.5511 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 21:44:19 | RUN DONE  | runBest 0.5068 | allTime 0.5068 | baseline 0.5511 | epochs 60 | games 29521
+2026-08-21 22:04:06 | NEW BEST  | valMse 0.2177 | prevAllTime 0.2245 | baseline 0.2440 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 22:04:09 | NEW BEST  | valMse 0.2161 | prevAllTime 0.2177 | baseline 0.2440 | trainEx 1421494 | valEx 84555 | games 29521
+2026-08-21 22:08:34 | RUN DONE  | runBest 0.2161 | allTime 0.2161 | baseline 0.2440 | epochs 60 | games 29521
+2026-08-21 22:19:13 | RUN DONE  | runBest 0.2161 | allTime 0.2161 | baseline 0.2440 | epochs 60 | games 29521
+2026-08-21 23:04:36 | NEW BEST  | valMse 0.2155 | prevAllTime 0.2161 | baseline 0.2440 | trainEx 1432866 | valEx 84555 | games 29777
+2026-08-21 23:10:10 | RUN DONE  | runBest 0.2155 | allTime 0.2155 | baseline 0.2440 | epochs 40 | games 29777
+2026-08-21 23:43:28 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 30289
+2026-08-22 00:18:46 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 30801
+2026-08-22 00:38:21 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 31057
+2026-08-22 00:57:55 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 31313
+2026-08-22 01:17:45 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 31569
+2026-08-22 01:37:59 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 31825
+2026-08-22 01:58:19 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 32081
+2026-08-22 02:18:56 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 32337
+2026-08-22 02:39:03 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 32593
+2026-08-22 02:59:34 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 32849
+2026-08-22 03:19:59 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 33105
+2026-08-22 03:40:21 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 33361
+2026-08-22 04:01:45 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 33617
+2026-08-22 04:22:10 | RUN DONE  | runBest 0.1969 | allTime 0.1969 | baseline 0.2219 | epochs 40 | games 33873
+2026-08-22 15:53:39 | RUN DONE  | runBest 0.1910 | evalMse none yet | resultOnlyMse 0.1910 | allTime 0.1910 | baseline 0.2132 | epochs 60 | games 34129
+2026-08-22 16:49:48 | NEW BEST  | valMse 0.1598 | evalMse 0.1662 | resultOnlyMse 0.0532 | prevAllTime 0.1753 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:49 | NEW BEST  | valMse 0.1531 | evalMse 0.1590 | resultOnlyMse 0.0539 | prevAllTime 0.1598 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:50 | NEW BEST  | valMse 0.1498 | evalMse 0.1555 | resultOnlyMse 0.0544 | prevAllTime 0.1531 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:50 | NEW BEST  | valMse 0.1458 | evalMse 0.1512 | resultOnlyMse 0.0563 | prevAllTime 0.1498 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:51 | NEW BEST  | valMse 0.1444 | evalMse 0.1496 | resultOnlyMse 0.0563 | prevAllTime 0.1458 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:52 | NEW BEST  | valMse 0.1435 | evalMse 0.1487 | resultOnlyMse 0.0559 | prevAllTime 0.1444 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:53 | NEW BEST  | valMse 0.1408 | evalMse 0.1459 | resultOnlyMse 0.0566 | prevAllTime 0.1435 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:53 | NEW BEST  | valMse 0.1400 | evalMse 0.1449 | resultOnlyMse 0.0572 | prevAllTime 0.1408 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:54 | NEW BEST  | valMse 0.1378 | evalMse 0.1426 | resultOnlyMse 0.0578 | prevAllTime 0.1400 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:55 | NEW BEST  | valMse 0.1373 | evalMse 0.1420 | resultOnlyMse 0.0585 | prevAllTime 0.1378 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:56 | NEW BEST  | valMse 0.1357 | evalMse 0.1403 | resultOnlyMse 0.0583 | prevAllTime 0.1373 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:57 | NEW BEST  | valMse 0.1354 | evalMse 0.1400 | resultOnlyMse 0.0578 | prevAllTime 0.1357 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:49:58 | NEW BEST  | valMse 0.1339 | evalMse 0.1385 | resultOnlyMse 0.0579 | prevAllTime 0.1354 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:00 | NEW BEST  | valMse 0.1338 | evalMse 0.1383 | resultOnlyMse 0.0578 | prevAllTime 0.1339 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:00 | NEW BEST  | valMse 0.1326 | evalMse 0.1371 | resultOnlyMse 0.0579 | prevAllTime 0.1338 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:01 | NEW BEST  | valMse 0.1323 | evalMse 0.1368 | resultOnlyMse 0.0569 | prevAllTime 0.1326 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:02 | NEW BEST  | valMse 0.1321 | evalMse 0.1365 | resultOnlyMse 0.0585 | prevAllTime 0.1323 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:03 | NEW BEST  | valMse 0.1318 | evalMse 0.1363 | resultOnlyMse 0.0570 | prevAllTime 0.1321 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:04 | NEW BEST  | valMse 0.1315 | evalMse 0.1359 | resultOnlyMse 0.0577 | prevAllTime 0.1318 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:06 | NEW BEST  | valMse 0.1310 | evalMse 0.1354 | resultOnlyMse 0.0579 | prevAllTime 0.1315 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:07 | NEW BEST  | valMse 0.1308 | evalMse 0.1351 | resultOnlyMse 0.0573 | prevAllTime 0.1310 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:10 | NEW BEST  | valMse 0.1301 | evalMse 0.1344 | resultOnlyMse 0.0574 | prevAllTime 0.1308 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:16 | NEW BEST  | valMse 0.1298 | evalMse 0.1342 | resultOnlyMse 0.0572 | prevAllTime 0.1301 | baseline 0.2137 | trainEx 25548 | valEx 674 | games 34313
+2026-08-22 16:50:33 | RUN DONE  | runBest 0.1298 | evalMse 0.1342 | resultOnlyMse 0.0572 | allTime 0.1298 | baseline 0.2137 | epochs 60 | games 34313
+2026-08-22 17:01:12 | NEW BEST  | valMse 0.1297 | evalMse 0.1339 | resultOnlyMse 0.0589 | prevAllTime 0.1298 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:12 | NEW BEST  | valMse 0.1293 | evalMse 0.1335 | resultOnlyMse 0.0592 | prevAllTime 0.1297 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:13 | NEW BEST  | valMse 0.1290 | evalMse 0.1331 | resultOnlyMse 0.0599 | prevAllTime 0.1293 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:14 | NEW BEST  | valMse 0.1282 | evalMse 0.1322 | resultOnlyMse 0.0603 | prevAllTime 0.1290 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:15 | NEW BEST  | valMse 0.1274 | evalMse 0.1314 | resultOnlyMse 0.0598 | prevAllTime 0.1282 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:17 | NEW BEST  | valMse 0.1267 | evalMse 0.1307 | resultOnlyMse 0.0600 | prevAllTime 0.1274 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:20 | NEW BEST  | valMse 0.1262 | evalMse 0.1302 | resultOnlyMse 0.0604 | prevAllTime 0.1267 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:21 | NEW BEST  | valMse 0.1262 | evalMse 0.1301 | resultOnlyMse 0.0604 | prevAllTime 0.1262 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:22 | NEW BEST  | valMse 0.1261 | evalMse 0.1300 | resultOnlyMse 0.0599 | prevAllTime 0.1262 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:24 | NEW BEST  | valMse 0.1253 | evalMse 0.1292 | resultOnlyMse 0.0602 | prevAllTime 0.1261 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:26 | NEW BEST  | valMse 0.1250 | evalMse 0.1289 | resultOnlyMse 0.0599 | prevAllTime 0.1253 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:26 | NEW BEST  | valMse 0.1249 | evalMse 0.1287 | resultOnlyMse 0.0602 | prevAllTime 0.1250 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:29 | NEW BEST  | valMse 0.1247 | evalMse 0.1286 | resultOnlyMse 0.0596 | prevAllTime 0.1249 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:34 | NEW BEST  | valMse 0.1241 | evalMse 0.1279 | resultOnlyMse 0.0599 | prevAllTime 0.1247 | baseline 0.2137 | trainEx 60520 | valEx 674 | games 34569
+2026-08-22 17:01:38 | RUN DONE  | runBest 0.1241 | evalMse 0.1279 | resultOnlyMse 0.0599 | allTime 0.1241 | baseline 0.2137 | epochs 16 | games 34569
+2026-08-22 17:11:22 | RUN DONE  | runBest 0.1241 | evalMse 0.1279 | resultOnlyMse 0.0599 | allTime 0.1241 | baseline 0.2137 | epochs 16 | games 34825
+2026-08-22 17:20:44 | NEW BEST  | valMse 0.1236 | evalMse 0.1271 | resultOnlyMse 0.0637 | prevAllTime 0.1241 | baseline 0.2137 | trainEx 129480 | valEx 674 | games 35081
+2026-08-22 17:20:47 | NEW BEST  | valMse 0.1229 | evalMse 0.1265 | resultOnlyMse 0.0639 | prevAllTime 0.1236 | baseline 0.2137 | trainEx 129480 | valEx 674 | games 35081
+2026-08-22 17:20:54 | NEW BEST  | valMse 0.1218 | evalMse 0.1253 | resultOnlyMse 0.0638 | prevAllTime 0.1229 | baseline 0.2137 | trainEx 129480 | valEx 674 | games 35081
+2026-08-22 17:21:31 | RUN DONE  | runBest 0.1218 | evalMse 0.1253 | resultOnlyMse 0.0638 | allTime 0.1218 | baseline 0.2137 | epochs 16 | games 35081
+2026-08-22 17:30:23 | NEW BEST  | valMse 0.1211 | evalMse 0.1245 | resultOnlyMse 0.0655 | prevAllTime 0.1218 | baseline 0.2137 | trainEx 162184 | valEx 674 | games 35337
+2026-08-22 17:31:27 | RUN DONE  | runBest 0.1211 | evalMse 0.1245 | resultOnlyMse 0.0655 | allTime 0.1211 | baseline 0.2137 | epochs 16 | games 35337
+2026-08-22 17:40:40 | NEW BEST  | valMse 0.1203 | evalMse 0.1236 | resultOnlyMse 0.0646 | prevAllTime 0.1211 | baseline 0.2137 | trainEx 195476 | valEx 674 | games 35593
+2026-08-22 17:41:54 | RUN DONE  | runBest 0.1203 | evalMse 0.1236 | resultOnlyMse 0.0646 | allTime 0.1203 | baseline 0.2137 | epochs 16 | games 35593
+2026-08-22 17:52:46 | RUN DONE  | runBest 0.1203 | evalMse 0.1236 | resultOnlyMse 0.0646 | allTime 0.1203 | baseline 0.2137 | epochs 16 | games 35849
+2026-08-22 18:03:32 | RUN DONE  | runBest 0.1203 | evalMse 0.1236 | resultOnlyMse 0.0646 | allTime 0.1203 | baseline 0.2137 | epochs 16 | games 36105
+2026-08-22 18:12:40 | RUN DONE  | runBest 0.1203 | evalMse 0.1236 | resultOnlyMse 0.0646 | allTime 0.1203 | baseline 0.2137 | epochs 16 | games 36361
+2026-08-22 18:20:35 | RUN DONE  | runBest 0.1203 | evalMse 0.1236 | resultOnlyMse 0.0646 | allTime 0.1203 | baseline 0.2137 | epochs 16 | games 36617
+2026-08-22 18:47:18 | NEW BEST  | valMse 0.0675 | evalMse 0.0488 | resultOnlyMse 0.1613 | prevAllTime 0.1032 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:20 | NEW BEST  | valMse 0.0649 | evalMse 0.0452 | resultOnlyMse 0.1640 | prevAllTime 0.0675 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:21 | NEW BEST  | valMse 0.0638 | evalMse 0.0431 | resultOnlyMse 0.1676 | prevAllTime 0.0649 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:23 | NEW BEST  | valMse 0.0633 | evalMse 0.0418 | resultOnlyMse 0.1708 | prevAllTime 0.0638 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:25 | NEW BEST  | valMse 0.0625 | evalMse 0.0406 | resultOnlyMse 0.1722 | prevAllTime 0.0633 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:28 | NEW BEST  | valMse 0.0619 | evalMse 0.0395 | resultOnlyMse 0.1745 | prevAllTime 0.0625 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:30 | NEW BEST  | valMse 0.0619 | evalMse 0.0392 | resultOnlyMse 0.1757 | prevAllTime 0.0619 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:31 | NEW BEST  | valMse 0.0613 | evalMse 0.0383 | resultOnlyMse 0.1769 | prevAllTime 0.0619 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:33 | NEW BEST  | valMse 0.0613 | evalMse 0.0379 | resultOnlyMse 0.1787 | prevAllTime 0.0613 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:36 | NEW BEST  | valMse 0.0609 | evalMse 0.0371 | resultOnlyMse 0.1807 | prevAllTime 0.0613 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:38 | NEW BEST  | valMse 0.0607 | evalMse 0.0368 | resultOnlyMse 0.1809 | prevAllTime 0.0609 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:43 | NEW BEST  | valMse 0.0604 | evalMse 0.0357 | resultOnlyMse 0.1847 | prevAllTime 0.0607 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:45 | NEW BEST  | valMse 0.0604 | evalMse 0.0353 | resultOnlyMse 0.1863 | prevAllTime 0.0604 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:47 | NEW BEST  | valMse 0.0601 | evalMse 0.0349 | resultOnlyMse 0.1865 | prevAllTime 0.0604 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:49 | NEW BEST  | valMse 0.0601 | evalMse 0.0349 | resultOnlyMse 0.1866 | prevAllTime 0.0601 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:47:54 | NEW BEST  | valMse 0.0597 | evalMse 0.0342 | resultOnlyMse 0.1879 | prevAllTime 0.0601 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:01 | NEW BEST  | valMse 0.0594 | evalMse 0.0332 | resultOnlyMse 0.1905 | prevAllTime 0.0597 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:14 | NEW BEST  | valMse 0.0592 | evalMse 0.0322 | resultOnlyMse 0.1951 | prevAllTime 0.0594 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:15 | NEW BEST  | valMse 0.0591 | evalMse 0.0321 | resultOnlyMse 0.1946 | prevAllTime 0.0592 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:18 | NEW BEST  | valMse 0.0591 | evalMse 0.0322 | resultOnlyMse 0.1943 | prevAllTime 0.0591 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:22 | NEW BEST  | valMse 0.0591 | evalMse 0.0318 | resultOnlyMse 0.1960 | prevAllTime 0.0591 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:23 | NEW BEST  | valMse 0.0590 | evalMse 0.0317 | resultOnlyMse 0.1962 | prevAllTime 0.0591 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:25 | NEW BEST  | valMse 0.0588 | evalMse 0.0316 | resultOnlyMse 0.1958 | prevAllTime 0.0590 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:26 | NEW BEST  | valMse 0.0587 | evalMse 0.0315 | resultOnlyMse 0.1954 | prevAllTime 0.0588 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:34 | NEW BEST  | valMse 0.0587 | evalMse 0.0312 | resultOnlyMse 0.1965 | prevAllTime 0.0587 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:40 | NEW BEST  | valMse 0.0586 | evalMse 0.0309 | resultOnlyMse 0.1977 | prevAllTime 0.0587 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:49 | NEW BEST  | valMse 0.0585 | evalMse 0.0305 | resultOnlyMse 0.1992 | prevAllTime 0.0586 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:48:59 | NEW BEST  | valMse 0.0583 | evalMse 0.0302 | resultOnlyMse 0.1997 | prevAllTime 0.0585 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:49:02 | NEW BEST  | valMse 0.0583 | evalMse 0.0301 | resultOnlyMse 0.1998 | prevAllTime 0.0583 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:49:08 | NEW BEST  | valMse 0.0583 | evalMse 0.0301 | resultOnlyMse 0.1997 | prevAllTime 0.0583 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:49:21 | NEW BEST  | valMse 0.0580 | evalMse 0.0297 | resultOnlyMse 0.2001 | prevAllTime 0.0583 | baseline 0.1539 | trainEx 293092 | valEx 9477 | games 36873
+2026-08-22 18:49:45 | RUN DONE  | runBest 0.0580 | evalMse 0.0297 | resultOnlyMse 0.2001 | allTime 0.0580 | baseline 0.1539 | epochs 16 | games 36873
+2026-08-22 18:59:12 | NEW BEST  | valMse 0.0565 | evalMse 0.0296 | resultOnlyMse 0.2049 | prevAllTime 0.0566 | baseline 0.1650 | trainEx 328616 | valEx 10284 | games 37129
+2026-08-22 18:59:15 | NEW BEST  | valMse 0.0563 | evalMse 0.0294 | resultOnlyMse 0.2044 | prevAllTime 0.0565 | baseline 0.1650 | trainEx 328616 | valEx 10284 | games 37129
+2026-08-22 18:59:25 | NEW BEST  | valMse 0.0562 | evalMse 0.0294 | resultOnlyMse 0.2043 | prevAllTime 0.0563 | baseline 0.1650 | trainEx 328616 | valEx 10284 | games 37129
+2026-08-22 18:59:47 | NEW BEST  | valMse 0.0561 | evalMse 0.0289 | resultOnlyMse 0.2058 | prevAllTime 0.0562 | baseline 0.1650 | trainEx 328616 | valEx 10284 | games 37129
+2026-08-22 18:59:58 | NEW BEST  | valMse 0.0560 | evalMse 0.0289 | resultOnlyMse 0.2057 | prevAllTime 0.0561 | baseline 0.1650 | trainEx 328616 | valEx 10284 | games 37129
+2026-08-22 19:00:29 | NEW BEST  | valMse 0.0560 | evalMse 0.0285 | resultOnlyMse 0.2073 | prevAllTime 0.0560 | baseline 0.1650 | trainEx 328616 | valEx 10284 | games 37129
+2026-08-22 19:00:36 | NEW BEST  | valMse 0.0559 | evalMse 0.0284 | resultOnlyMse 0.2076 | prevAllTime 0.0560 | baseline 0.1650 | trainEx 328616 | valEx 10284 | games 37129
+2026-08-22 19:00:50 | NEW BEST  | valMse 0.0558 | evalMse 0.0287 | resultOnlyMse 0.2052 | prevAllTime 0.0559 | baseline 0.1650 | trainEx 328616 | valEx 10284 | games 37129
+2026-08-22 19:01:10 | NEW BEST  | valMse 0.0557 | evalMse 0.0285 | resultOnlyMse 0.2058 | prevAllTime 0.0558 | baseline 0.1650 | trainEx 328616 | valEx 10284 | games 37129
+2026-08-22 19:01:23 | RUN DONE  | runBest 0.0557 | evalMse 0.0285 | resultOnlyMse 0.2058 | allTime 0.0557 | baseline 0.1650 | epochs 16 | games 37129
+2026-08-22 19:13:07 | RUN DONE  | runBest 0.0535 | evalMse 0.0297 | resultOnlyMse 0.2044 | allTime 0.0535 | baseline 0.1807 | epochs 16 | games 37385
+2026-08-22 19:23:33 | NEW BEST  | valMse 0.0513 | evalMse 0.0288 | resultOnlyMse 0.2097 | prevAllTime 0.0514 | baseline 0.1907 | trainEx 388052 | valEx 12741 | games 37641
+2026-08-22 19:23:35 | NEW BEST  | valMse 0.0512 | evalMse 0.0288 | resultOnlyMse 0.2091 | prevAllTime 0.0513 | baseline 0.1907 | trainEx 388052 | valEx 12741 | games 37641
+2026-08-22 19:23:52 | NEW BEST  | valMse 0.0511 | evalMse 0.0285 | resultOnlyMse 0.2101 | prevAllTime 0.0512 | baseline 0.1907 | trainEx 388052 | valEx 12741 | games 37641
+2026-08-22 19:24:08 | NEW BEST  | valMse 0.0509 | evalMse 0.0286 | resultOnlyMse 0.2083 | prevAllTime 0.0511 | baseline 0.1907 | trainEx 388052 | valEx 12741 | games 37641
+2026-08-22 19:26:13 | RUN DONE  | runBest 0.0509 | evalMse 0.0286 | resultOnlyMse 0.2083 | allTime 0.0509 | baseline 0.1907 | epochs 16 | games 37641
+2026-08-22 19:36:44 | NEW BEST  | valMse 0.0499 | evalMse 0.0289 | resultOnlyMse 0.2114 | prevAllTime 0.0500 | baseline 0.1994 | trainEx 421060 | valEx 13897 | games 37897
+2026-08-22 19:38:51 | RUN DONE  | runBest 0.0499 | evalMse 0.0289 | resultOnlyMse 0.2114 | allTime 0.0499 | baseline 0.1994 | epochs 16 | games 37897
+2026-08-22 21:27:56 | RUN DONE  | runBest 0.0499 | evalMse 0.0289 | resultOnlyMse 0.2114 | allTime 0.0499 | baseline 0.1994 | epochs 60 | games 37897
+2026-08-22 22:58:11 | NEW BEST  | valMse 0.0505 | evalMse 0.0284 | resultOnlyMse 0.1715 | prevAllTime 0.0508 | baseline 0.1974 | trainEx 505008 | valEx 18649 | games 38153
+2026-08-22 22:58:14 | NEW BEST  | valMse 0.0504 | evalMse 0.0282 | resultOnlyMse 0.1719 | prevAllTime 0.0505 | baseline 0.1974 | trainEx 505008 | valEx 18649 | games 38153
+2026-08-22 22:58:18 | NEW BEST  | valMse 0.0502 | evalMse 0.0282 | resultOnlyMse 0.1707 | prevAllTime 0.0504 | baseline 0.1974 | trainEx 505008 | valEx 18649 | games 38153
+2026-08-22 22:58:21 | NEW BEST  | valMse 0.0501 | evalMse 0.0279 | resultOnlyMse 0.1716 | prevAllTime 0.0502 | baseline 0.1974 | trainEx 505008 | valEx 18649 | games 38153
+2026-08-22 22:58:23 | NEW BEST  | valMse 0.0501 | evalMse 0.0279 | resultOnlyMse 0.1715 | prevAllTime 0.0501 | baseline 0.1974 | trainEx 505008 | valEx 18649 | games 38153
+2026-08-22 22:58:26 | NEW BEST  | valMse 0.0500 | evalMse 0.0280 | resultOnlyMse 0.1703 | prevAllTime 0.0501 | baseline 0.1974 | trainEx 505008 | valEx 18649 | games 38153
+2026-08-22 22:58:39 | NEW BEST  | valMse 0.0499 | evalMse 0.0278 | resultOnlyMse 0.1709 | prevAllTime 0.0500 | baseline 0.1974 | trainEx 505008 | valEx 18649 | games 38153
+2026-08-22 22:59:03 | NEW BEST  | valMse 0.0499 | evalMse 0.0278 | resultOnlyMse 0.1707 | prevAllTime 0.0499 | baseline 0.1974 | trainEx 505008 | valEx 18649 | games 38153
+2026-08-22 23:01:01 | RUN DONE  | runBest 0.0499 | evalMse 0.0278 | resultOnlyMse 0.1707 | allTime 0.0499 | baseline 0.1974 | epochs 16 | games 38153
+2026-08-22 23:21:11 | NEW BEST  | valMse 0.0544 | evalMse 0.0281 | resultOnlyMse 0.1582 | prevAllTime 0.0545 | baseline 0.2000 | trainEx 516160 | valEx 20398 | games 38460
+2026-08-22 23:23:39 | RUN DONE  | runBest 0.0544 | evalMse 0.0281 | resultOnlyMse 0.1582 | allTime 0.0544 | baseline 0.2000 | epochs 16 | games 38460
+2026-08-22 23:57:50 | NEW BEST  | valMse 0.0470 | evalMse 0.0470 | resultOnlyMse none yet | prevAllTime 0.0516 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:50 | NEW BEST  | valMse 0.0435 | evalMse 0.0435 | resultOnlyMse none yet | prevAllTime 0.0470 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:50 | NEW BEST  | valMse 0.0410 | evalMse 0.0410 | resultOnlyMse none yet | prevAllTime 0.0435 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0393 | evalMse 0.0393 | resultOnlyMse none yet | prevAllTime 0.0410 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0384 | evalMse 0.0384 | resultOnlyMse none yet | prevAllTime 0.0393 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0376 | evalMse 0.0376 | resultOnlyMse none yet | prevAllTime 0.0384 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0369 | evalMse 0.0369 | resultOnlyMse none yet | prevAllTime 0.0376 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0363 | evalMse 0.0363 | resultOnlyMse none yet | prevAllTime 0.0369 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0356 | evalMse 0.0356 | resultOnlyMse none yet | prevAllTime 0.0363 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0348 | evalMse 0.0348 | resultOnlyMse none yet | prevAllTime 0.0356 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0342 | evalMse 0.0342 | resultOnlyMse none yet | prevAllTime 0.0348 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0338 | evalMse 0.0338 | resultOnlyMse none yet | prevAllTime 0.0342 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0335 | evalMse 0.0335 | resultOnlyMse none yet | prevAllTime 0.0338 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:51 | NEW BEST  | valMse 0.0333 | evalMse 0.0333 | resultOnlyMse none yet | prevAllTime 0.0335 | baseline 0.4488 | trainEx 1900 | valEx 49 | games 25007
+2026-08-22 23:57:54 | RUN DONE  | runBest 0.0333 | evalMse 0.0333 | resultOnlyMse none yet | allTime 0.0333 | baseline 0.4488 | epochs 60 | games 25007
+2026-08-23 00:19:30 | NEW BEST  | valMse 0.0236 | evalMse 0.0236 | resultOnlyMse none yet | prevAllTime 0.0238 | baseline 0.4942 | trainEx 5397 | valEx 155 | games 25084
+2026-08-23 00:19:30 | NEW BEST  | valMse 0.0235 | evalMse 0.0235 | resultOnlyMse none yet | prevAllTime 0.0236 | baseline 0.4942 | trainEx 5397 | valEx 155 | games 25084
+2026-08-23 00:19:32 | RUN DONE  | runBest 0.0235 | evalMse 0.0235 | resultOnlyMse none yet | allTime 0.0235 | baseline 0.4942 | epochs 16 | games 25084
+2026-08-23 00:38:50 | RUN DONE  | runBest 0.0380 | evalMse 0.0380 | resultOnlyMse none yet | allTime 0.0380 | baseline 0.5502 | epochs 16 | games 25205
+2026-08-23 01:04:07 | NEW BEST  | valMse 0.0591 | evalMse 0.0591 | resultOnlyMse none yet | prevAllTime 0.0598 | baseline 0.4958 | trainEx 15765 | valEx 598 | games 25348
+2026-08-23 01:04:07 | NEW BEST  | valMse 0.0587 | evalMse 0.0587 | resultOnlyMse none yet | prevAllTime 0.0591 | baseline 0.4958 | trainEx 15765 | valEx 598 | games 25348
+2026-08-23 01:04:08 | NEW BEST  | valMse 0.0584 | evalMse 0.0584 | resultOnlyMse none yet | prevAllTime 0.0587 | baseline 0.4958 | trainEx 15765 | valEx 598 | games 25348
+2026-08-23 01:04:11 | RUN DONE  | runBest 0.0584 | evalMse 0.0584 | resultOnlyMse none yet | allTime 0.0584 | baseline 0.4958 | epochs 16 | games 25348
+2026-08-23 01:33:42 | NEW BEST  | valMse 0.0487 | evalMse 0.0487 | resultOnlyMse none yet | prevAllTime 0.0490 | baseline 0.5271 | trainEx 23065 | valEx 1046 | games 25527
+2026-08-23 01:33:43 | NEW BEST  | valMse 0.0485 | evalMse 0.0485 | resultOnlyMse none yet | prevAllTime 0.0487 | baseline 0.5271 | trainEx 23065 | valEx 1046 | games 25527
+2026-08-23 01:33:49 | RUN DONE  | runBest 0.0485 | evalMse 0.0485 | resultOnlyMse none yet | allTime 0.0485 | baseline 0.5271 | epochs 16 | games 25527
+2026-08-23 02:15:01 | NEW BEST  | valMse 0.0450 | evalMse 0.0450 | resultOnlyMse none yet | prevAllTime 0.0452 | baseline 0.4899 | trainEx 35075 | valEx 1614 | games 25797
+2026-08-23 02:15:02 | NEW BEST  | valMse 0.0445 | evalMse 0.0445 | resultOnlyMse none yet | prevAllTime 0.0450 | baseline 0.4899 | trainEx 35075 | valEx 1614 | games 25797
+2026-08-23 02:15:05 | NEW BEST  | valMse 0.0444 | evalMse 0.0444 | resultOnlyMse none yet | prevAllTime 0.0445 | baseline 0.4899 | trainEx 35075 | valEx 1614 | games 25797
+2026-08-23 02:15:13 | RUN DONE  | runBest 0.0444 | evalMse 0.0444 | resultOnlyMse none yet | allTime 0.0444 | baseline 0.4899 | epochs 16 | games 25797
+2026-08-23 03:08:20 | NEW BEST  | valMse 0.0409 | evalMse 0.0409 | resultOnlyMse none yet | prevAllTime 0.0414 | baseline 0.4867 | trainEx 52432 | valEx 2151 | games 26147
+2026-08-23 03:08:21 | NEW BEST  | valMse 0.0405 | evalMse 0.0405 | resultOnlyMse none yet | prevAllTime 0.0409 | baseline 0.4867 | trainEx 52432 | valEx 2151 | games 26147
+2026-08-23 03:08:22 | NEW BEST  | valMse 0.0405 | evalMse 0.0405 | resultOnlyMse none yet | prevAllTime 0.0405 | baseline 0.4867 | trainEx 52432 | valEx 2151 | games 26147
+2026-08-23 03:08:25 | NEW BEST  | valMse 0.0403 | evalMse 0.0403 | resultOnlyMse none yet | prevAllTime 0.0405 | baseline 0.4867 | trainEx 52432 | valEx 2151 | games 26147
+2026-08-23 03:08:25 | NEW BEST  | valMse 0.0402 | evalMse 0.0402 | resultOnlyMse none yet | prevAllTime 0.0403 | baseline 0.4867 | trainEx 52432 | valEx 2151 | games 26147
+2026-08-23 03:08:26 | NEW BEST  | valMse 0.0401 | evalMse 0.0401 | resultOnlyMse none yet | prevAllTime 0.0402 | baseline 0.4867 | trainEx 52432 | valEx 2151 | games 26147
+2026-08-23 03:08:28 | NEW BEST  | valMse 0.0400 | evalMse 0.0400 | resultOnlyMse none yet | prevAllTime 0.0401 | baseline 0.4867 | trainEx 52432 | valEx 2151 | games 26147
+2026-08-23 03:08:28 | NEW BEST  | valMse 0.0398 | evalMse 0.0398 | resultOnlyMse none yet | prevAllTime 0.0400 | baseline 0.4867 | trainEx 52432 | valEx 2151 | games 26147
+2026-08-23 03:08:29 | NEW BEST  | valMse 0.0396 | evalMse 0.0396 | resultOnlyMse none yet | prevAllTime 0.0398 | baseline 0.4867 | trainEx 52432 | valEx 2151 | games 26147
+2026-08-23 03:08:37 | NEW BEST  | valMse 0.0395 | evalMse 0.0395 | resultOnlyMse none yet | prevAllTime 0.0396 | baseline 0.4867 | trainEx 52432 | valEx 2151 | games 26147
+2026-08-23 03:08:37 | RUN DONE  | runBest 0.0395 | evalMse 0.0395 | resultOnlyMse none yet | allTime 0.0395 | baseline 0.4867 | epochs 16 | games 26147
+2026-08-23 04:19:09 | NEW BEST  | valMse 0.0409 | evalMse 0.0409 | resultOnlyMse none yet | prevAllTime 0.0410 | baseline 0.4690 | trainEx 76470 | valEx 3271 | games 26609
+2026-08-23 04:19:10 | NEW BEST  | valMse 0.0408 | evalMse 0.0408 | resultOnlyMse none yet | prevAllTime 0.0409 | baseline 0.4690 | trainEx 76470 | valEx 3271 | games 26609
+2026-08-23 04:19:12 | NEW BEST  | valMse 0.0405 | evalMse 0.0405 | resultOnlyMse none yet | prevAllTime 0.0408 | baseline 0.4690 | trainEx 76470 | valEx 3271 | games 26609
+2026-08-23 04:19:14 | NEW BEST  | valMse 0.0404 | evalMse 0.0404 | resultOnlyMse none yet | prevAllTime 0.0405 | baseline 0.4690 | trainEx 76470 | valEx 3271 | games 26609
+2026-08-23 04:19:16 | NEW BEST  | valMse 0.0401 | evalMse 0.0401 | resultOnlyMse none yet | prevAllTime 0.0404 | baseline 0.4690 | trainEx 76470 | valEx 3271 | games 26609
+2026-08-23 04:19:18 | NEW BEST  | valMse 0.0400 | evalMse 0.0400 | resultOnlyMse none yet | prevAllTime 0.0401 | baseline 0.4690 | trainEx 76470 | valEx 3271 | games 26609
+2026-08-23 04:19:36 | RUN DONE  | runBest 0.0400 | evalMse 0.0400 | resultOnlyMse none yet | allTime 0.0400 | baseline 0.4690 | epochs 16 | games 26609
+2026-08-23 05:52:23 | NEW BEST  | valMse 0.0442 | evalMse 0.0442 | resultOnlyMse none yet | prevAllTime 0.0447 | baseline 0.4713 | trainEx 108220 | valEx 4831 | games 27221
+2026-08-23 05:52:28 | NEW BEST  | valMse 0.0441 | evalMse 0.0441 | resultOnlyMse none yet | prevAllTime 0.0442 | baseline 0.4713 | trainEx 108220 | valEx 4831 | games 27221
+2026-08-23 05:52:29 | NEW BEST  | valMse 0.0440 | evalMse 0.0440 | resultOnlyMse none yet | prevAllTime 0.0441 | baseline 0.4713 | trainEx 108220 | valEx 4831 | games 27221
+2026-08-23 05:52:33 | NEW BEST  | valMse 0.0434 | evalMse 0.0434 | resultOnlyMse none yet | prevAllTime 0.0440 | baseline 0.4713 | trainEx 108220 | valEx 4831 | games 27221
+2026-08-23 05:52:47 | NEW BEST  | valMse 0.0434 | evalMse 0.0434 | resultOnlyMse none yet | prevAllTime 0.0434 | baseline 0.4713 | trainEx 108220 | valEx 4831 | games 27221
+2026-08-23 05:53:00 | RUN DONE  | runBest 0.0434 | evalMse 0.0434 | resultOnlyMse none yet | allTime 0.0434 | baseline 0.4713 | epochs 16 | games 27221
+2026-08-23 07:49:35 | NEW BEST  | valMse 0.0435 | evalMse 0.0435 | resultOnlyMse none yet | prevAllTime 0.0437 | baseline 0.4635 | trainEx 144770 | valEx 6610 | games 27905
+2026-08-23 07:49:35 | NEW BEST  | valMse 0.0435 | evalMse 0.0435 | resultOnlyMse none yet | prevAllTime 0.0435 | baseline 0.4635 | trainEx 144770 | valEx 6610 | games 27905
+2026-08-23 07:49:37 | NEW BEST  | valMse 0.0433 | evalMse 0.0433 | resultOnlyMse none yet | prevAllTime 0.0435 | baseline 0.4635 | trainEx 144770 | valEx 6610 | games 27905
+2026-08-23 07:49:40 | NEW BEST  | valMse 0.0431 | evalMse 0.0431 | resultOnlyMse none yet | prevAllTime 0.0433 | baseline 0.4635 | trainEx 144770 | valEx 6610 | games 27905
+2026-08-23 07:49:42 | NEW BEST  | valMse 0.0427 | evalMse 0.0427 | resultOnlyMse none yet | prevAllTime 0.0431 | baseline 0.4635 | trainEx 144770 | valEx 6610 | games 27905
+2026-08-23 07:50:23 | RUN DONE  | runBest 0.0427 | evalMse 0.0427 | resultOnlyMse none yet | allTime 0.0427 | baseline 0.4635 | epochs 16 | games 27905
+2026-08-23 09:56:37 | NEW BEST  | valMse 0.0417 | evalMse 0.0417 | resultOnlyMse none yet | prevAllTime 0.0418 | baseline 0.4596 | trainEx 190762 | valEx 8552 | games 28674
+2026-08-23 09:56:38 | NEW BEST  | valMse 0.0416 | evalMse 0.0416 | resultOnlyMse none yet | prevAllTime 0.0417 | baseline 0.4596 | trainEx 190762 | valEx 8552 | games 28674
+2026-08-23 09:56:41 | NEW BEST  | valMse 0.0415 | evalMse 0.0415 | resultOnlyMse none yet | prevAllTime 0.0416 | baseline 0.4596 | trainEx 190762 | valEx 8552 | games 28674
+2026-08-23 09:56:41 | NEW BEST  | valMse 0.0414 | evalMse 0.0414 | resultOnlyMse none yet | prevAllTime 0.0415 | baseline 0.4596 | trainEx 190762 | valEx 8552 | games 28674
+2026-08-23 09:56:44 | NEW BEST  | valMse 0.0414 | evalMse 0.0414 | resultOnlyMse none yet | prevAllTime 0.0414 | baseline 0.4596 | trainEx 190762 | valEx 8552 | games 28674
+2026-08-23 09:56:45 | NEW BEST  | valMse 0.0413 | evalMse 0.0413 | resultOnlyMse none yet | prevAllTime 0.0414 | baseline 0.4596 | trainEx 190762 | valEx 8552 | games 28674
+2026-08-23 09:56:46 | NEW BEST  | valMse 0.0413 | evalMse 0.0413 | resultOnlyMse none yet | prevAllTime 0.0413 | baseline 0.4596 | trainEx 190762 | valEx 8552 | games 28674
+2026-08-23 09:56:48 | NEW BEST  | valMse 0.0410 | evalMse 0.0410 | resultOnlyMse none yet | prevAllTime 0.0413 | baseline 0.4596 | trainEx 190762 | valEx 8552 | games 28674
+2026-08-23 09:56:59 | NEW BEST  | valMse 0.0408 | evalMse 0.0408 | resultOnlyMse none yet | prevAllTime 0.0410 | baseline 0.4596 | trainEx 190762 | valEx 8552 | games 28674
+2026-08-23 09:57:24 | RUN DONE  | runBest 0.0408 | evalMse 0.0408 | resultOnlyMse none yet | allTime 0.0408 | baseline 0.4596 | epochs 16 | games 28674
+2026-08-23 10:53:55 | RUN DONE  | runBest 0.0409 | evalMse 0.0409 | resultOnlyMse none yet | allTime 0.0409 | baseline 0.4603 | epochs 16 | games 28735
+2026-08-23 11:14:20 | NEW BEST  | valMse 0.0406 | evalMse 0.0406 | resultOnlyMse none yet | prevAllTime 0.0406 | baseline 0.4619 | trainEx 196005 | valEx 8694 | games 28810
+2026-08-23 11:15:25 | RUN DONE  | runBest 0.0406 | evalMse 0.0406 | resultOnlyMse none yet | allTime 0.0406 | baseline 0.4619 | epochs 16 | games 28810

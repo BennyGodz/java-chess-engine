@@ -41,3 +41,11 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Generated training data ###
+games/
+nnue_weights*.bin
+output.txt
+moves.txt
+training_data.txt
+training_moves.txt
