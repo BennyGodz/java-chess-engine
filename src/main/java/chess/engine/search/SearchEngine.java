@@ -4,49 +4,36 @@ import chess.board.Board;
 import chess.board.Move;
 import chess.board.Position;
 import chess.engine.evaluation.Evaluator;
-import chess.pieces.Bishop;
 import chess.pieces.King;
-import chess.pieces.Knight;
 import chess.pieces.Pawn;
 import chess.pieces.Piece;
 import chess.pieces.Queen;
-import chess.pieces.Rook;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
 /**
- * Alpha-beta search with iterative deepening, transposition table and move ordering.
- *
- * <p>Features: principal variation search, null move pruning, late move pruning, check/promotion/
- * endgame extensions, quiescence search with futility pruning, delta pruning and razoring, plus
- * killer moves and a history heuristic for ordering quiet moves.
+ * Alpha-beta search with iterative deepening, transposition table and move ordering. Features:
+ * principal variation search, null move pruning, bounded check/promotion extensions, tactical
+ * quiescence search, killer moves and a history heuristic for ordering quiet moves.
  */
 public class SearchEngine {
 
-  /** Score assigned to checkmate; mate-in-n scores are MATE_SCORE minus the ply. */
   public static final int MATE_SCORE = 100_000;
 
   private static final int INFINITY = 1_000_000;
-  private static final int MAX_CHECK_EXTENSIONS = 12;
+  private static final int MAX_CHECK_EXTENSIONS = 4;
   private static final int MAX_QUIESCENCE_DEPTH = 16;
-  private static final int ENDGAME_EXTENSION = 1;
-  private static final int PROMOTION_EXTENSION = 2;
+  private static final int PROMOTION_EXTENSION = 1;
 
   private final Evaluator evaluator;
   private long nodes;
   private long deadlineNanos;
 
-  // Kept for API compatibility; never written by this engine.
-  @SuppressWarnings("unused")
-  private long zobristKey;
-
-  // Transposition table: ~2 million entries, indexed by a mixed Zobrist key.
   private static final int TT_SIZE = 1 << 21;
   private static final int TT_MASK = TT_SIZE - 1;
   private final TTEntry[] tt;
 
-  // Killer moves per ply and history heuristic [color][start * 64 + end].
   private static final int MAX_DEPTH = 64;
   private final int[][] historyHeuristic;
   private final Move[][] killerMoves;
@@ -73,7 +60,6 @@ public class SearchEngine {
     }
   }
 
-  // History entries decay once this many nodes have passed, so old data does not dominate.
   private static final int HISTORY_RESET_NODES = 100_000;
 
   public SearchEngine() {
@@ -85,36 +71,33 @@ public class SearchEngine {
     this.tt = new TTEntry[TT_SIZE];
     this.historyHeuristic = new int[2][64 * 64];
     this.killerMoves = new Move[MAX_DEPTH][2];
-    this.nodes = 0;
   }
 
   /**
-   * Finds the best move for the side to move using iterative deepening up to {@code maxDepth}.
-   *
-   * <p>Deepening stops early when the score is stable (< 50 centipawns change) for three
-   * consecutive depths, or when the hard deadline (twice the soft limit) expires.
+   * Finds the best move for the side to move using iterative deepening up to maxDepth. A complete,
+   * deterministic static pass supplies the fallback, so even a very short timeout returns a real
+   * score and a reasoned move instead of the first legal move and an uninitialized score.
    */
   public SearchResult findBestMove(Board board, int maxDepth, long timeLimitMillis) {
     List<Move> legalMoves = board.getLegalMoves(board.isWhiteToMove());
 
     if (legalMoves.isEmpty()) {
-      return new SearchResult(null, 0, 0, 0);
+      int score = board.isInCheck(board.isWhiteToMove()) ? -MATE_SCORE : 0;
+      return new SearchResult(null, score, 0, 0);
     }
 
     nodes = 0;
-    deadlineNanos = System.nanoTime() + Math.max(1, timeLimitMillis) * 1_000_000L;
-
-    // Instant mate detection avoids burning the time budget on depth 1+ searches.
-    Move mateMove = findImmediateMate(board, legalMoves);
-    if (mateMove != null) {
-      return new SearchResult(mateMove, MATE_SCORE, 1, nodes);
-    }
-
-    Move bestMove = legalMoves.get(0);
-    int bestScore = -INFINITY;
+    RootResult fallback = chooseStaticFallback(board, legalMoves);
+    Move bestMove = fallback.move();
+    int bestScore = fallback.score();
     int completedDepth = 0;
-    int prevScore = -INFINITY;
-    int stallCount = 0;
+
+    long budgetMillis = Math.max(1L, timeLimitMillis);
+    long budgetNanos =
+        budgetMillis > Long.MAX_VALUE / 1_000_000L ? Long.MAX_VALUE : budgetMillis * 1_000_000L;
+    long startNanos = System.nanoTime();
+    deadlineNanos =
+        startNanos > Long.MAX_VALUE - budgetNanos ? Long.MAX_VALUE : startNanos + budgetNanos;
 
     for (int depth = 1; depth <= maxDepth; depth++) {
       try {
@@ -122,18 +105,6 @@ public class SearchEngine {
         bestMove = result.move();
         bestScore = result.score();
         completedDepth = depth;
-
-        if (Math.abs(bestScore - prevScore) < 50) {
-          stallCount++;
-        } else {
-          stallCount = 0;
-        }
-        prevScore = bestScore;
-
-        if (stallCount >= 3 && depth >= 3) {
-          System.out.println("Search stalled at depth " + depth + ", stopping iterative deepening");
-          break;
-        }
       } catch (SearchTimeoutException e) {
         break;
       }
@@ -142,17 +113,24 @@ public class SearchEngine {
     return new SearchResult(bestMove, bestScore, completedDepth, nodes);
   }
 
-  /** Returns a move that mates the opponent immediately, or null if none exists. */
-  private Move findImmediateMate(Board board, List<Move> moves) {
+  private RootResult chooseStaticFallback(Board board, List<Move> moves) {
+    boolean white = board.isWhiteToMove();
+    Move bestMove = moves.get(0);
+    int bestScore = -INFINITY;
+
     for (Move move : moves) {
-      checkTime();
       Board child = board.copyAndPlayMoveForSearch(move);
-      boolean enemyToMove = child.isWhiteToMove();
-      if (child.isInCheck(enemyToMove) && child.getLegalMoves(enemyToMove).isEmpty()) {
-        return move;
+      if (child.isCheckmate(child.isWhiteToMove())) {
+        return new RootResult(move, MATE_SCORE);
+      }
+
+      int score = white ? evaluator.evaluate(child) : -evaluator.evaluate(child);
+      if (score > bestScore) {
+        bestMove = move;
+        bestScore = score;
       }
     }
-    return null;
+    return new RootResult(bestMove, bestScore);
   }
 
   /**
@@ -179,32 +157,19 @@ public class SearchEngine {
       Board child = board.copyAndPlayMoveForSearch(move);
       boolean givesCheck = child.isInCheck(child.isWhiteToMove());
 
-      int extension = 0;
-      if (givesCheck && MAX_CHECK_EXTENSIONS > 0) extension = 1;
-      if (move.isPromotion()) extension += PROMOTION_EXTENSION;
-      if (isEndgame(child)) extension += ENDGAME_EXTENSION;
+      int extension = (givesCheck ? 1 : 0) + (move.isPromotion() ? PROMOTION_EXTENSION : 0);
+      int childDepth = Math.max(0, depth - 1 + extension);
 
       int score;
       if (i == 0) {
-        score =
-            -negamax(
-                child,
-                Math.max(0, depth - 1 + extension),
-                -beta,
-                -alpha,
-                1,
-                givesCheck ? 1 : 0,
-                true);
+        score = -negamax(child, childDepth, -beta, -alpha, 1, givesCheck ? 1 : 0, true);
       } else {
-        // Null-window scout; re-search with the full window when it fails high.
         int nullScore =
-            -negamax(child, Math.max(0, depth - 1 + extension), -alpha - 1, -alpha, 1, givesCheck ? 1 : 0, true);
-        if (nullScore > alpha) {
-          score =
-              -negamax(child, Math.max(0, depth - 1 + extension), -beta, -alpha, 1, givesCheck ? 1 : 0, true);
-        } else {
-          score = nullScore;
-        }
+            -negamax(child, childDepth, -alpha - 1, -alpha, 1, givesCheck ? 1 : 0, true);
+        score =
+            nullScore > alpha
+                ? -negamax(child, childDepth, -beta, -alpha, 1, givesCheck ? 1 : 0, true)
+                : nullScore;
       }
 
       if (score > bestScore) {
@@ -212,20 +177,25 @@ public class SearchEngine {
         bestMove = move;
       }
       if (score > alpha) alpha = score;
-      if (alpha >= beta) break; // Beta cutoff
+      if (alpha >= beta) break;
     }
     return new RootResult(bestMove, bestScore);
   }
 
   /**
-   * Negamax alpha-beta search. Returns the score from the point of view of the side to move.
-   *
-   * <p>Probes the transposition table before generating moves, handles terminal states (mate,
-   * stalemate and the five draw rules), prunes with null moves, extends forcing moves and records
-   * killer/history data on beta cutoffs.
+   * Negamax alpha-beta search. Returns the score from the point of view of the side to move. Probes
+   * the transposition table before generating moves, handles terminal states (mate, stalemate and
+   * the five draw rules), prunes with null moves, extends forcing moves and records killer/history
+   * data on beta cutoffs.
    */
   private int negamax(
-      Board board, int depth, int alpha, int beta, int ply, int checkExtensions, boolean allowNull) {
+      Board board,
+      int depth,
+      int alpha,
+      int beta,
+      int ply,
+      int checkExtensions,
+      boolean allowNull) {
     nodes++;
     checkTime();
 
@@ -244,16 +214,8 @@ public class SearchEngine {
     if (moves.isEmpty()) {
       return board.isInCheck(side) ? -MATE_SCORE + ply : 0;
     }
-    if (board.isSeventyFiveMoveRule()
-        || board.isFivefoldRepetition()
-        || board.isFiftyMoveRule()
-        || board.isThreefoldRepetition()
-        || board.isInsufficientMaterial()) {
-      return 0;
-    }
-    if (depth <= 0) {
-      return quiescence(board, alpha, beta, ply, 0);
-    }
+    if (isDraw(board)) return 0;
+    if (depth <= 0) return quiescence(board, alpha, beta, ply, 0);
 
     /*
      * Null move pruning: pass the turn and search at reduced depth. A fail-high reply means the
@@ -271,21 +233,11 @@ public class SearchEngine {
     Move ttMove = ttEntry != null && ttEntry.key == positionKey ? ttEntry.bestMove : null;
     orderMoves(board, moves, ttMove, ply);
 
-    nodes++;
-    if (nodes % HISTORY_RESET_NODES == 0) {
-      // Decay history to zero out stale values, but keep killer moves untouched.
-      for (int i = 0; i < 2; i++) {
-        for (int j = 0; j < 64 * 64; j++) {
-          historyHeuristic[i][j] = Math.max(0, historyHeuristic[i][j] - 500);
-        }
-      }
-    }
+    if (++nodes % HISTORY_RESET_NODES == 0) decayHistory();
 
     int bestScore = -INFINITY;
     Move bestMove = null;
-    int bestMoveIndex = -1;
     int originalAlpha = alpha;
-    int movesSearched = 0;
 
     for (int i = 0; i < moves.size(); i++) {
       Move move = moves.get(i);
@@ -293,31 +245,33 @@ public class SearchEngine {
       Board child = board.copyAndPlayMoveForSearch(move);
       boolean givesCheck = child.isInCheck(child.isWhiteToMove());
 
+      int newCheckExtensions = checkExtensions;
       int extension = 0;
-      if (givesCheck && checkExtensions < MAX_CHECK_EXTENSIONS) extension = 1;
+      if (givesCheck && checkExtensions < MAX_CHECK_EXTENSIONS) {
+        extension = 1;
+        newCheckExtensions++;
+      }
       if (move.isPromotion()) extension += PROMOTION_EXTENSION;
-      if (isEndgame(child)) extension += ENDGAME_EXTENSION;
-
-      int newCheckExtensions = givesCheck ? checkExtensions + 1 : 0;
       int score;
 
-      // Late move pruning: quiet, non-checking moves searched after the fourth get a cheap
-      // null-window probe first and are only expanded fully when that fails high.
       boolean shouldPruneLMP =
-          !givesCheck && !move.isPromotion() && !isCapture(board, move) && depth <= 4 && movesSearched >= 4;
+          !givesCheck && !move.isPromotion() && !isCapture(board, move) && depth <= 4 && i >= 4;
 
       if (shouldPruneLMP) {
         score = -negamax(child, depth - 2, -alpha - 1, -alpha, ply + 1, newCheckExtensions, true);
         if (score > alpha) {
-          score = -negamax(child, depth - 1 + extension, -beta, -alpha, ply + 1, newCheckExtensions, true);
+          score =
+              -negamax(
+                  child, depth - 1 + extension, -beta, -alpha, ply + 1, newCheckExtensions, true);
         }
       } else {
-        score = -negamax(child, depth - 1 + extension, -beta, -alpha, ply + 1, newCheckExtensions, true);
+        score =
+            -negamax(
+                child, depth - 1 + extension, -beta, -alpha, ply + 1, newCheckExtensions, true);
       }
 
       if (score > bestScore) {
         bestScore = score;
-        bestMoveIndex = i;
         bestMove = move;
       }
       if (score > alpha) alpha = score;
@@ -331,24 +285,20 @@ public class SearchEngine {
         }
         break;
       }
-      movesSearched++;
     }
 
     TTFlag flag = TTFlag.EXACT;
     if (bestScore <= originalAlpha) flag = TTFlag.ALPHA;
     else if (bestScore >= beta) flag = TTFlag.BETA;
-    tt[ttIndex] =
-        new TTEntry(
-            positionKey, depth, bestScore, flag, bestMove != null ? moves.get(bestMoveIndex) : null);
+    tt[ttIndex] = new TTEntry(positionKey, depth, bestScore, flag, bestMove);
 
     return bestScore;
   }
 
   /**
-   * Quiescence search: resolves captures and checks so leaf evaluations stay tactically stable.
-   *
-   * <p>In check, all evasions are searched; otherwise stand-pat bounds are applied and only
-   * tactical moves are explored, filtered by futility pruning, delta pruning and razoring.
+   * Quiescence search: resolves captures and check evasions so leaf evaluations stay tactically
+   * stable. Stand-pat is never used while in check, and speculative pruning cannot discard a saving
+   * capture.
    */
   private int quiescence(Board board, int alpha, int beta, int ply, int quiescenceDepth) {
     nodes++;
@@ -359,95 +309,30 @@ public class SearchEngine {
     if (legalMoves.isEmpty()) {
       return board.isInCheck(side) ? -MATE_SCORE + ply : 0;
     }
+    if (isDraw(board)) return 0;
 
-    if (board.isInCheck(side)) {
-      if (quiescenceDepth >= MAX_QUIESCENCE_DEPTH) {
-        return side ? evaluator.evaluate(board) : -evaluator.evaluate(board);
-      }
-      orderMoves(board, legalMoves, null, ply);
+    boolean inCheck = board.isInCheck(side);
+    if (!inCheck) {
+      int standPat = side ? evaluator.evaluate(board) : -evaluator.evaluate(board);
+      if (standPat >= beta) return beta;
+      if (standPat > alpha) alpha = standPat;
+    }
+    if (quiescenceDepth >= MAX_QUIESCENCE_DEPTH) {
+      return inCheck ? (side ? evaluator.evaluate(board) : -evaluator.evaluate(board)) : alpha;
+    }
+
+    List<Move> movesToSearch = legalMoves;
+    if (!inCheck) {
+      movesToSearch = new ArrayList<>();
       for (Move move : legalMoves) {
-        checkTime();
-        Board child = board.copyAndPlayMoveForSearch(move);
-        int score = -quiescence(child, -beta, -alpha, ply + 1, quiescenceDepth + 1);
-        if (score >= beta) return beta;
-        if (score > alpha) alpha = score;
+        if (isTactical(board, move)) movesToSearch.add(move);
       }
-      return alpha;
     }
+    if (movesToSearch.isEmpty()) return alpha;
 
-    int standPat = side ? evaluator.evaluate(board) : -evaluator.evaluate(board);
-    if (standPat >= beta) return beta;
-    if (standPat > alpha) alpha = standPat;
-    if (quiescenceDepth >= MAX_QUIESCENCE_DEPTH) return alpha;
-
-    // Extended futility pruning at the quiescence root: drop non-tactical moves whose best case
-    // (stand-pat plus the mover's value minus margin) still cannot reach alpha.
-    if (quiescenceDepth == 0) {
-      List<Move> pruned = new ArrayList<>();
-      for (Move move : legalMoves) {
-        if (!isTactical(board, move)) {
-          Piece piece = board.getPiece(move.getStart());
-          int pieceValue = piece != null ? piece.getValue() : 0;
-          if (standPat + pieceValue - 100 < alpha) continue;
-        }
-        pruned.add(move);
-      }
-      legalMoves = pruned;
-      if (legalMoves.isEmpty()) return alpha;
-    }
-
-    // Delta pruning: when stand-pat is already close to beta, only tactical moves can matter.
-    if (standPat + 50 >= beta) {
-      List<Move> tactical = new ArrayList<>();
-      for (Move move : legalMoves) {
-        if (isTactical(board, move)) tactical.add(move);
-      }
-      if (tactical.isEmpty()) return alpha;
-      orderMoves(board, tactical, null, ply);
-      for (Move move : tactical) {
-        checkTime();
-        if (isCapture(board, move) && !move.isPromotion()) {
-          Piece captured = board.getPiece(move.getEnd());
-          if (captured != null && standPat + captured.getValue() + 200 < alpha) continue;
-        }
-        Board child = board.copyAndPlayMoveForSearch(move);
-        int score = -quiescence(child, -beta, -alpha, ply + 1, quiescenceDepth + 1);
-        if (score >= beta) return beta;
-        if (score > alpha) alpha = score;
-      }
-      return alpha;
-    }
-
-    // Razoring near the leaves: hopeless stand-pat positions skip straight to static eval.
-    if (quiescenceDepth < 2) {
-      int razorMargin = (2 - quiescenceDepth) * 50; // 100 at depth 0, 50 at depth 1
-      if (standPat + razorMargin <= alpha) return alpha;
-    }
-
-    List<Move> tactical = new ArrayList<>();
-    for (Move move : legalMoves) {
-      if (isTactical(board, move)) tactical.add(move);
-    }
-    if (tactical.isEmpty()) return alpha;
-
-    orderMoves(board, tactical, null, ply);
-    for (Move move : tactical) {
+    orderMoves(board, movesToSearch, null, ply);
+    for (Move move : movesToSearch) {
       checkTime();
-      // Delta pruning plus a simple exchange estimate for captures.
-      if (isCapture(board, move) && !move.isPromotion()) {
-        Piece captured = board.getPiece(move.getEnd());
-        if (captured != null) {
-          Piece attacker = board.getPiece(move.getStart());
-          int attackerValue = attacker == null ? 0 : attacker.getValue();
-          int captureDiff = captured.getValue() - attackerValue;
-          if (captureDiff < 0) {
-            // Losing capture: prune only when clearly below alpha even after paying the loss.
-            if (standPat + Math.abs(captureDiff) + 100 < alpha) continue;
-          } else {
-            if (standPat + captured.getValue() + 200 < alpha) continue;
-          }
-        }
-      }
       Board child = board.copyAndPlayMoveForSearch(move);
       int score = -quiescence(child, -beta, -alpha, ply + 1, quiescenceDepth + 1);
       if (score >= beta) return beta;
@@ -456,7 +341,7 @@ public class SearchEngine {
     return alpha;
   }
 
-  /** True if {@code white}'s army contains any piece besides king and pawns (null-move guard). */
+  /** True if white's army contains any piece besides king and pawns (null-move guard). */
   private boolean hasNonPawnMaterial(Board board, boolean white) {
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
@@ -468,34 +353,20 @@ public class SearchEngine {
     return false;
   }
 
-  /**
-   * Heuristically decides whether the position counts as an endgame (few heavy pieces), which
-   * triggers extra search extensions.
-   */
-  private boolean isEndgame(Board board) {
-    int queens = 0, rooks = 0, minors = 0, pawns = 0;
-    for (int r = 0; r < 8; r++) {
-      for (int c = 0; c < 8; c++) {
-        Piece piece = board.getPiece(new Position(r, c));
-        if (piece == null) continue;
-        if (piece instanceof Queen) queens++;
-        else if (piece instanceof Rook) rooks++;
-        else if (piece instanceof Bishop || piece instanceof Knight) minors++;
-        else if (piece instanceof Pawn) pawns++;
-      }
+  private boolean isDraw(Board board) {
+    return board.isSeventyFiveMoveRule()
+        || board.isFivefoldRepetition()
+        || board.isFiftyMoveRule()
+        || board.isThreefoldRepetition()
+        || board.isInsufficientMaterial();
+  }
+
+  private void decayHistory() {
+    for (int[] entries : historyHeuristic) {
+      for (int i = 0; i < entries.length; i++) entries[i] = Math.max(0, entries[i] - 500);
     }
-    if (queens == 0 && rooks <= 1) return true;
-    if (queens == 0 && rooks <= 2 && minors <= 3) return true;
-    if (rooks + minors <= 2 && pawns <= 8) return true;
-    return false;
   }
 
-  /** Returns the current Zobrist key for the position. */
-  public long getZobristKey() {
-    return zobristKey;
-  }
-
-  /** Captures, en passant and promotions count as tactical moves. */
   private boolean isTactical(Board board, Move move) {
     return move.isPromotion() || move.isEnPassant() || isCapture(board, move);
   }
@@ -504,7 +375,6 @@ public class SearchEngine {
     return board.getPiece(move.getEnd()) != null;
   }
 
-  /** Sorts moves best-first according to {@link #moveOrderingScore}. */
   private void orderMoves(Board board, List<Move> moves, Move ttMove, int ply) {
     moves.sort(Comparator.comparingInt(move -> -moveOrderingScore(board, move, ttMove, ply)));
   }
@@ -515,9 +385,7 @@ public class SearchEngine {
    */
   private int moveOrderingScore(Board board, Move move, Move ttMove, int ply) {
     int score = 0;
-    if (ttMove != null && sameMove(move, ttMove)) {
-      score += 2_000_000;
-    }
+    if (sameMove(move, ttMove)) score += 2_000_000;
     if (move.isPromotion()) {
       score += 300_000;
       if (move.getPromotionPiece() != null) score += move.getPromotionPiece().getValue();
@@ -544,7 +412,6 @@ public class SearchEngine {
     return score;
   }
 
-  /** Packs a move into the history table index: start square * 64 plus end square. */
   private static int historyIndex(Move move) {
     return move.getStart().getRow() * 512
         + move.getStart().getColumn() * 64
@@ -552,19 +419,14 @@ public class SearchEngine {
         + move.getEnd().getColumn();
   }
 
-  /** Moves match when start square, end square and promotion piece type all agree. */
   private static boolean sameMove(Move a, Move b) {
     if (a == null || b == null) return false;
     if (!a.getStart().equals(b.getStart())) return false;
     if (!a.getEnd().equals(b.getEnd())) return false;
     if (a.isPromotion() != b.isPromotion()) return false;
-    if (a.isPromotion()) {
-      return a.getPromotionPiece().getClass() == b.getPromotionPiece().getClass();
-    }
-    return true;
+    return !a.isPromotion() || a.getPromotionPiece().getClass() == b.getPromotionPiece().getClass();
   }
 
-  /** Throws {@link SearchTimeoutException} once the search deadline has passed. */
   private void checkTime() {
     if (System.nanoTime() >= deadlineNanos) throw new SearchTimeoutException();
   }
@@ -573,6 +435,5 @@ public class SearchEngine {
 
   private record RootResult(Move move, int score) {}
 
-  /** Result of a top-level search: chosen move, its score, the depth reached and node count. */
   public record SearchResult(Move bestMove, int score, int depth, long nodes) {}
 }

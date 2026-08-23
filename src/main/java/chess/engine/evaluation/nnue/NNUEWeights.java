@@ -1,12 +1,18 @@
 package chess.engine.evaluation.nnue;
 
-import java.io.*;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.Random;
 
 /**
- * The weights of the NNUE network.
- *
- * <p>Architecture: 769 inputs, then hidden layers of 256, 256 and 128 ReLU units, then a single
- * tanh output. Provides random initialization (He-style) and binary save/load.
+ * The weights of the NNUE network: 769 inputs, then hidden layers of 256, 256 and 128 ReLU units,
+ * then a single tanh output. Provides random initialization (He-style) and binary save/load.
  */
 public class NNUEWeights {
 
@@ -24,14 +30,8 @@ public class NNUEWeights {
   public final double[] outputWeights;
   public double outputBias;
 
-  /**
-   * Expected number of non-zero inputs per position (~32 pieces plus flags and structural inputs).
-   * First-layer variance depends on ACTIVE inputs, not on INPUT_SIZE; scaling by the dense fan-in
-   * leaves first-layer pre-activations so small that many ReLU units are born dead.
-   */
   private static final double EXPECTED_ACTIVE_INPUTS = 40.0;
 
-  /** Creates zero-initialized weights of the fixed architecture. */
   public NNUEWeights() {
     inputWeights = new double[INPUT_SIZE][HIDDEN_SIZE];
     hiddenBias = new double[HIDDEN_SIZE];
@@ -42,51 +42,47 @@ public class NNUEWeights {
     outputWeights = new double[THIRD_HIDDEN_SIZE];
   }
 
-  /** Creates randomly initialized weights with a fixed seed (deterministic, for fallbacks/tests). */
   public static NNUEWeights random() {
     return random(12345L);
   }
 
-  /** Creates randomly initialized weights using He initialization scaled to input sparsity. */
   public static NNUEWeights random(long seed) {
     NNUEWeights weights = new NNUEWeights();
-    java.util.Random random = new java.util.Random(seed);
-
-    double inputScale = Math.sqrt(2.0 / EXPECTED_ACTIVE_INPUTS);
-    double hiddenScale = Math.sqrt(2.0 / HIDDEN_SIZE);
-    double secondHiddenScale = Math.sqrt(2.0 / SECOND_HIDDEN_SIZE);
-    double thirdHiddenScale = Math.sqrt(2.0 / THIRD_HIDDEN_SIZE);
-
-    for (int i = 0; i < INPUT_SIZE; i++) {
-      for (int h = 0; h < HIDDEN_SIZE; h++) {
-        weights.inputWeights[i][h] = random.nextGaussian() * inputScale;
-      }
-    }
-
-    for (int h = 0; h < HIDDEN_SIZE; h++) {
-      weights.hiddenBias[h] = 0.0;
-      for (int h2 = 0; h2 < SECOND_HIDDEN_SIZE; h2++) {
-        weights.hiddenWeights[h][h2] = random.nextGaussian() * hiddenScale;
-      }
-    }
-
-    for (int h = 0; h < SECOND_HIDDEN_SIZE; h++) {
-      weights.secondHiddenBias[h] = 0.0;
-      for (int h2 = 0; h2 < THIRD_HIDDEN_SIZE; h2++) {
-        weights.secondHiddenWeights[h][h2] = random.nextGaussian() * secondHiddenScale;
-      }
-    }
-
-    for (int h2 = 0; h2 < THIRD_HIDDEN_SIZE; h2++) {
-      weights.thirdHiddenBias[h2] = 0.0;
-      weights.outputWeights[h2] = random.nextGaussian() * thirdHiddenScale;
-    }
-
-    weights.outputBias = 0.0;
+    Random random = new Random(seed);
+    fillGaussian(weights.inputWeights, Math.sqrt(2.0 / EXPECTED_ACTIVE_INPUTS), random);
+    fillGaussian(weights.hiddenWeights, Math.sqrt(2.0 / HIDDEN_SIZE), random);
+    fillGaussian(weights.secondHiddenWeights, Math.sqrt(2.0 / SECOND_HIDDEN_SIZE), random);
+    fillGaussian(weights.outputWeights, Math.sqrt(2.0 / THIRD_HIDDEN_SIZE), random);
     return weights;
   }
 
-  /** Writes all weights to a binary file, preceded by the layer sizes as a format check. */
+  public NNUEWeights copy() {
+    NNUEWeights copy = new NNUEWeights();
+    copy(inputWeights, copy.inputWeights);
+    System.arraycopy(hiddenBias, 0, copy.hiddenBias, 0, hiddenBias.length);
+    copy(hiddenWeights, copy.hiddenWeights);
+    System.arraycopy(secondHiddenBias, 0, copy.secondHiddenBias, 0, secondHiddenBias.length);
+    copy(secondHiddenWeights, copy.secondHiddenWeights);
+    System.arraycopy(thirdHiddenBias, 0, copy.thirdHiddenBias, 0, thirdHiddenBias.length);
+    System.arraycopy(outputWeights, 0, copy.outputWeights, 0, outputWeights.length);
+    copy.outputBias = outputBias;
+    return copy;
+  }
+
+  private static void copy(double[][] source, double[][] target) {
+    for (int i = 0; i < source.length; i++) {
+      System.arraycopy(source[i], 0, target[i], 0, source[i].length);
+    }
+  }
+
+  private static void fillGaussian(double[][] values, double scale, Random random) {
+    for (double[] row : values) fillGaussian(row, scale, random);
+  }
+
+  private static void fillGaussian(double[] values, double scale, Random random) {
+    for (int i = 0; i < values.length; i++) values[i] = random.nextGaussian() * scale;
+  }
+
   public void save(File file) throws IOException {
     try (DataOutputStream out =
         new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)))) {
@@ -95,38 +91,17 @@ public class NNUEWeights {
       out.writeInt(SECOND_HIDDEN_SIZE);
       out.writeInt(THIRD_HIDDEN_SIZE);
 
-      for (int i = 0; i < INPUT_SIZE; i++) {
-        for (int h = 0; h < HIDDEN_SIZE; h++) {
-          out.writeDouble(inputWeights[i][h]);
-        }
-      }
-      for (int h = 0; h < HIDDEN_SIZE; h++) {
-        out.writeDouble(hiddenBias[h]);
-      }
-      for (int h = 0; h < HIDDEN_SIZE; h++) {
-        for (int h2 = 0; h2 < SECOND_HIDDEN_SIZE; h2++) {
-          out.writeDouble(hiddenWeights[h][h2]);
-        }
-      }
-      for (int h2 = 0; h2 < SECOND_HIDDEN_SIZE; h2++) {
-        out.writeDouble(secondHiddenBias[h2]);
-      }
-      for (int h = 0; h < SECOND_HIDDEN_SIZE; h++) {
-        for (int h2 = 0; h2 < THIRD_HIDDEN_SIZE; h2++) {
-          out.writeDouble(secondHiddenWeights[h][h2]);
-        }
-      }
-      for (int h2 = 0; h2 < THIRD_HIDDEN_SIZE; h2++) {
-        out.writeDouble(thirdHiddenBias[h2]);
-      }
-      for (int h2 = 0; h2 < THIRD_HIDDEN_SIZE; h2++) {
-        out.writeDouble(outputWeights[h2]);
-      }
+      write(out, inputWeights);
+      write(out, hiddenBias);
+      write(out, hiddenWeights);
+      write(out, secondHiddenBias);
+      write(out, secondHiddenWeights);
+      write(out, thirdHiddenBias);
+      write(out, outputWeights);
       out.writeDouble(outputBias);
     }
   }
 
-  /** Reads weights written by {@link #save(File)}, verifying the architecture matches. */
   public static NNUEWeights load(File file) throws IOException {
     try (DataInputStream in =
         new DataInputStream(new BufferedInputStream(new FileInputStream(file)))) {
@@ -141,35 +116,31 @@ public class NNUEWeights {
         throw new IOException("Incompatible NNUE network architecture.");
       }
       NNUEWeights weights = new NNUEWeights();
-      for (int i = 0; i < INPUT_SIZE; i++) {
-        for (int h = 0; h < HIDDEN_SIZE; h++) {
-          weights.inputWeights[i][h] = in.readDouble();
-        }
-      }
-      for (int h = 0; h < HIDDEN_SIZE; h++) {
-        weights.hiddenBias[h] = in.readDouble();
-      }
-      for (int h = 0; h < HIDDEN_SIZE; h++) {
-        for (int h2 = 0; h2 < SECOND_HIDDEN_SIZE; h2++) {
-          weights.hiddenWeights[h][h2] = in.readDouble();
-        }
-      }
-      for (int h2 = 0; h2 < SECOND_HIDDEN_SIZE; h2++) {
-        weights.secondHiddenBias[h2] = in.readDouble();
-      }
-      for (int h = 0; h < SECOND_HIDDEN_SIZE; h++) {
-        for (int h2 = 0; h2 < THIRD_HIDDEN_SIZE; h2++) {
-          weights.secondHiddenWeights[h][h2] = in.readDouble();
-        }
-      }
-      for (int h2 = 0; h2 < THIRD_HIDDEN_SIZE; h2++) {
-        weights.thirdHiddenBias[h2] = in.readDouble();
-      }
-      for (int h2 = 0; h2 < THIRD_HIDDEN_SIZE; h2++) {
-        weights.outputWeights[h2] = in.readDouble();
-      }
+      read(in, weights.inputWeights);
+      read(in, weights.hiddenBias);
+      read(in, weights.hiddenWeights);
+      read(in, weights.secondHiddenBias);
+      read(in, weights.secondHiddenWeights);
+      read(in, weights.thirdHiddenBias);
+      read(in, weights.outputWeights);
       weights.outputBias = in.readDouble();
       return weights;
     }
+  }
+
+  private static void write(DataOutputStream out, double[][] values) throws IOException {
+    for (double[] row : values) write(out, row);
+  }
+
+  private static void write(DataOutputStream out, double[] values) throws IOException {
+    for (double value : values) out.writeDouble(value);
+  }
+
+  private static void read(DataInputStream in, double[][] values) throws IOException {
+    for (double[] row : values) read(in, row);
+  }
+
+  private static void read(DataInputStream in, double[] values) throws IOException {
+    for (int i = 0; i < values.length; i++) values[i] = in.readDouble();
   }
 }

@@ -29,10 +29,7 @@ public class LichessGame {
   private final OpeningManager openingManager;
   private Board board;
   private boolean botIsWhite;
-  private boolean gameStarted = false;
 
-  // Adaptive time management parameters
-  private static final int MIN_SEARCH_DEPTH = 8;
   private static final int MAX_SEARCH_DEPTH = 64;
   private long wtimeMs;
   private long btimeMs;
@@ -46,34 +43,12 @@ public class LichessGame {
     this.mapper = new ObjectMapper();
     this.engine = new SearchEngine();
     this.lichessClient = new LichessClient(token);
-    this.openingManager = new OpeningManager(engine);
+    this.openingManager = new OpeningManager();
     this.board = new Board();
   }
 
   public void stream() throws IOException, InterruptedException {
-    HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create("https://lichess.org/api/bot/game/stream/" + gameId))
-            .header("Authorization", "Bearer " + token)
-            .GET()
-            .build();
-
-    HttpResponse<InputStream> response =
-        httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-
-    if (response.statusCode() != 200) {
-      throw new IOException("Game stream failed. HTTP " + response.statusCode());
-    }
-
-    try (BufferedReader reader =
-        new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        if (line.isBlank()) continue;
-        JsonNode event = mapper.readTree(line);
-        handleEvent(event);
-      }
-    }
+    stream(this::handleEvent);
   }
 
   private void handleEvent(JsonNode event) {
@@ -90,9 +65,7 @@ public class LichessGame {
   }
 
   private void handleGameFull(JsonNode event) {
-    gameStarted = true;
     JsonNode white = event.get("white");
-    JsonNode black = event.get("black");
     String whiteId = white.has("id") ? white.get("id").asText() : "";
     String myId = getMyBotId();
     botIsWhite = whiteId.equalsIgnoreCase(myId);
@@ -162,17 +135,8 @@ public class LichessGame {
   private long calculateSearchTime() {
     long myTime = botIsWhite ? wtimeMs : btimeMs;
     long myInc = botIsWhite ? wincMs : bincMs;
-
-    if (myTime <= 0) return 100;  // Safety default if no time remaining
-
-    // Spend 1/40 of remaining time, with increment factor
-    long targetTime = myTime / 40 + (myInc * 3 / 4);
-
-    // Reasonable caps: minimum 100ms, maximum 5 seconds for normal play
-    // For very long time controls (10+ min), allow up to 30 seconds
-    long maxAllowed = myTime > 600000 ? 30000L : 5000L;
-
-    return Math.max(100, Math.min(targetTime, maxAllowed));
+    if (myTime <= 0) return 100;
+    return Math.clamp(myTime / 40 + myInc * 3 / 4, 100, myTime > 600000 ? 30000 : 5000);
   }
 
   private void rebuildBoardFromMoves(String moves) {
@@ -192,22 +156,6 @@ public class LichessGame {
       openingManager.recordMove(san);
       board.playMove(move);
     }
-  }
-
-  private void playUciMove(Board board, String uci) {
-    if (uci.length() < 4) throw new IllegalArgumentException("Invalid UCI move: " + uci);
-    String from = uci.substring(0, 2);
-    String to = uci.substring(2, 4);
-    char promotion = uci.length() >= 5 ? Character.toUpperCase(uci.charAt(4)) : 'Q';
-
-    Position start = algebraicToPosition(from);
-    Position end = algebraicToPosition(to);
-    Move move = board.findLegalMove(start, end, promotion);
-
-    if (move == null)
-      throw new IllegalStateException(
-          "Could not find legal move for UCI: " + uci + "\nBoard FEN: " + board.toFEN());
-    board.playMove(move);
   }
 
   private Position algebraicToPosition(String square) {
@@ -271,26 +219,12 @@ public class LichessGame {
     }
   }
 
-  private Move findEquivalentMove(Board board, Move original) {
-    for (Move move : board.getLegalMoves(board.isWhiteToMove())) {
-      if (!move.getStart().equals(original.getStart())) continue;
-      if (!move.getEnd().equals(original.getEnd())) continue;
-      if (move.isPromotion() != original.isPromotion()) continue;
-      if (move.isPromotion()
-          && move.getPromotionPiece().getNotationSymbol()
-              != original.getPromotionPiece().getNotationSymbol()) continue;
-      return move;
-    }
-    throw new IllegalStateException("Could not recreate opening move.");
-  }
-
   private String moveToUci(Move move) {
-    String uci = move.getStart().toAlgebraic() + move.getEnd().toAlgebraic();
-    if (move.isPromotion()) {
-      char promotionSymbol = move.getPromotionPiece().getNotationSymbol();
-      uci += Character.toLowerCase(promotionSymbol);
-    }
-    return uci;
+    return move.getStart().toAlgebraic()
+        + move.getEnd().toAlgebraic()
+        + (move.isPromotion()
+            ? Character.toLowerCase(move.getPromotionPiece().getNotationSymbol())
+            : "");
   }
 
   private String getMyBotId() {

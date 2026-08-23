@@ -5,106 +5,59 @@ import chess.board.Position;
 import chess.pieces.*;
 
 /**
- * Turns a board position into the NNUE network's input vector.
- *
- * <p>Feature layout (769 inputs total):
- *
- * <ul>
- *   <li>0-383: piece-square features, signed by colour (+1 white, -1 black)
- *   <li>384-511: white king square one-hot plus centre bonus
- *   <li>512-639: black king square one-hot plus centre bonus
- *   <li>640-663: pawn structure (passed, isolated, connected, backward, counts per file)
- *   <li>664-679: king safety (distance, colour complex, attackers, shield, mobility, centre control)
- *   <li>680-683: castling rights
- *   <li>684: en passant availability
- *   <li>768: side to move
- * </ul>
+ * Turns a board position into the NNUE network's input vector (769 inputs total): 0-383 piece
+ * square features signed by colour (+1 white, -1 black); 384-511 white king square one-hot plus
+ * centre bonus; 512-639 black king square one-hot plus centre bonus; 640-663 pawn structure
+ * (passed, isolated, connected, backward, counts per file); 664-679 king safety (distance, colour
+ * complex, attackers, shield, mobility, centre control); 680-683 castling rights; 684 en passant
+ * availability; 768 side to move.
  */
 public class NNUEFeatureExtractor {
 
-  /** Total input size of the network. */
   public static final int INPUT_SIZE = 769;
 
-  /**
-   * Extracts all features from a board into a fresh vector. White features are positive, black
-   * features negative.
-   */
   public double[] extract(Board board) {
     double[] features = new double[INPUT_SIZE];
 
-    // Piece-square block: one slot per piece type and square, +1 for White, -1 for Black,
-    // which lets the network distinguish colour through the sign alone.
     for (int row = 0; row < 8; row++) {
       for (int col = 0; col < 8; col++) {
-        Position pos = new Position(row, col);
-        Piece piece = board.getPiece(pos);
+        Piece piece = board.getPiece(new Position(row, col));
         if (piece != null) {
-          int squareIndex = row * 8 + col;
-          int pieceTypeIndex;
-          if (piece instanceof Pawn) pieceTypeIndex = 0;
-          else if (piece instanceof Knight) pieceTypeIndex = 1;
-          else if (piece instanceof Bishop) pieceTypeIndex = 2;
-          else if (piece instanceof Rook) pieceTypeIndex = 3;
-          else if (piece instanceof Queen) pieceTypeIndex = 4;
-          else if (piece instanceof King) pieceTypeIndex = 5;
-          else continue;
-
-          int featureIndex = pieceTypeIndex * 64 + squareIndex;
-          if (piece.isWhite()) {
-            features[featureIndex] = 1.0;
-          } else {
-            features[featureIndex] = -1.0;
-          }
+          features[pieceTypeIndex(piece) * 64 + row * 8 + col] = piece.isWhite() ? 1.0 : -1.0;
         }
       }
     }
 
-    // White king square (one-hot) and its small centre-control bonus.
-    Position whiteKing = board.findKing(true);
-    if (whiteKing != null) {
-      int squareIndex = whiteKing.getRow() * 8 + whiteKing.getColumn();
-      if (squareIndex >= 0 && squareIndex <= 63) {
-        features[384 + squareIndex] = 1.0;
-      }
-      int centerBonus = getKingCenterBonus(whiteKing);
-      if (centerBonus > 0) {
-        features[511] = centerBonus / 30.0;
-      }
-    }
-
-    // Black king square (one-hot) and its negated centre-control bonus.
-    Position blackKing = board.findKing(false);
-    if (blackKing != null) {
-      int squareIndex = blackKing.getRow() * 8 + blackKing.getColumn();
-      if (squareIndex >= 0 && squareIndex <= 63) {
-        features[512 + squareIndex] = 1.0;
-      }
-      int centerBonus = getKingCenterBonus(blackKing);
-      if (centerBonus > 0) {
-        features[639] = -centerBonus / 30.0;
-      }
-    }
+    addKingFeatures(board.findKing(true), features, 384, 511, 1.0);
+    addKingFeatures(board.findKing(false), features, 512, 639, -1.0);
 
     addPawnStructureFeatures(board, features);
-
     addKingSafetyFeatures(board, features);
 
-    // Castling rights: positive for White, negative for Black.
     features[680] = board.canCastleKingside(true) ? 1.0 : 0.0;
     features[681] = board.canCastleQueenside(true) ? 1.0 : 0.0;
     features[682] = board.canCastleKingside(false) ? -1.0 : 0.0;
     features[683] = board.canCastleQueenside(false) ? -1.0 : 0.0;
 
-    // En passant availability: +1 when White may capture, -1 when Black may.
-    features[684] = board.getEnPassantTarget() != null ? 1.0 : 0.0;
-    if (board.getEnPassantTarget() != null && !board.isWhiteToMove()) {
-      features[684] = -1.0;
-    }
-
-    // Side to move.
+    features[684] = board.getEnPassantTarget() == null ? 0.0 : board.isWhiteToMove() ? 1.0 : -1.0;
     features[768] = board.isWhiteToMove() ? 1.0 : 0.0;
-
     return features;
+  }
+
+  private static int pieceTypeIndex(Piece piece) {
+    if (piece instanceof Pawn) return 0;
+    if (piece instanceof Knight) return 1;
+    if (piece instanceof Bishop) return 2;
+    if (piece instanceof Rook) return 3;
+    if (piece instanceof Queen) return 4;
+    return 5;
+  }
+
+  private void addKingFeatures(
+      Position king, double[] features, int squareOffset, int bonusIndex, double sign) {
+    if (king == null) return;
+    features[squareOffset + king.getRow() * 8 + king.getColumn()] = 1.0;
+    features[bonusIndex] = sign * getKingCenterBonus(king) / 30.0;
   }
 
   /**
@@ -113,68 +66,37 @@ public class NNUEFeatureExtractor {
    * scaled so handcrafted inputs stay on the same order of magnitude as the ±1 piece features.
    */
   private void addPawnStructureFeatures(Board board, double[] features) {
-    boolean[] whitePawnFiles = new boolean[8];
-    boolean[] blackPawnFiles = new boolean[8];
-    int[] whitePawnCountPerFile = new int[8];
-    int[] blackPawnCountPerFile = new int[8];
+    int[][] pawnCounts = new int[2][8];
 
     for (int row = 0; row < 8; row++) {
       for (int col = 0; col < 8; col++) {
-        Position pos = new Position(row, col);
-        Piece piece = board.getPiece(pos);
-        if (piece == null) continue;
-
+        Piece piece = board.getPiece(new Position(row, col));
         if (piece instanceof Pawn) {
-          if (piece.isWhite()) {
-            whitePawnFiles[col] = true;
-            whitePawnCountPerFile[col]++;
-          } else {
-            blackPawnFiles[col] = true;
-            blackPawnCountPerFile[col]++;
-          }
+          pawnCounts[piece.isWhite() ? 0 : 1][col]++;
         }
       }
     }
 
-    // Passed pawns.
-    int whitePassedBonus = calculatePassedPawnBonus(board, true);
-    int blackPassedBonus = calculatePassedPawnBonus(board, false);
-    features[640] = Math.min(whitePassedBonus / 200.0, 1.0);
-    features[641] = -Math.min(blackPassedBonus / 200.0, 1.0);
-
-    // Isolated pawns.
-    boolean whiteHasIsolated = false;
-    boolean blackHasIsolated = false;
-
+    boolean[] whiteFiles = occupiedFiles(pawnCounts[0]);
+    boolean[] blackFiles = occupiedFiles(pawnCounts[1]);
+    features[640] = Math.min(calculatePassedPawnBonus(board, true) / 200.0, 1.0);
+    features[641] = -Math.min(calculatePassedPawnBonus(board, false) / 200.0, 1.0);
+    features[642] = hasIsolatedPawn(whiteFiles) ? 1.0 : 0.0;
+    features[643] = hasIsolatedPawn(blackFiles) ? -1.0 : 0.0;
+    features[644] = hasConnectedPawn(whiteFiles) ? 1.0 : 0.0;
+    features[645] = hasConnectedPawn(blackFiles) ? -1.0 : 0.0;
+    features[646] = features[642];
+    features[647] = features[643];
     for (int f = 0; f < 8; f++) {
-      boolean whiteAdjacent = (f > 0 && whitePawnFiles[f - 1]) || (f < 7 && whitePawnFiles[f + 1]);
-      boolean blackAdjacent = (f > 0 && blackPawnFiles[f - 1]) || (f < 7 && blackPawnFiles[f + 1]);
-      if (whitePawnFiles[f] && !whiteAdjacent) whiteHasIsolated = true;
-      if (blackPawnFiles[f] && !blackAdjacent) blackHasIsolated = true;
+      features[648 + f] = pawnCounts[0][f] / 8.0;
+      features[656 + f] = -pawnCounts[1][f] / 8.0;
     }
+  }
 
-    features[642] = whiteHasIsolated ? 1.0 : 0.0;
-    features[643] = blackHasIsolated ? -1.0 : 0.0;
-
-    // Connected pawn chains, evaluated independently per colour.
-    boolean whiteHasConnected = hasConnectedPawn(whitePawnFiles);
-    boolean blackHasConnected = hasConnectedPawn(blackPawnFiles);
-
-    features[644] = whiteHasConnected ? 1.0 : 0.0;
-    features[645] = blackHasConnected ? -1.0 : 0.0;
-
-    // Backward pawns, evaluated independently per colour.
-    boolean whiteHasBackward = hasBackwardPawn(whitePawnFiles);
-    boolean blackHasBackward = hasBackwardPawn(blackPawnFiles);
-
-    features[646] = whiteHasBackward ? 1.0 : 0.0;
-    features[647] = blackHasBackward ? -1.0 : 0.0;
-
-    // Pawn counts per file.
-    for (int f = 0; f < 8; f++) {
-      features[648 + f] = whitePawnCountPerFile[f] / 8.0;
-      features[656 + f] = -blackPawnCountPerFile[f] / 8.0;
-    }
+  private static boolean[] occupiedFiles(int[] pawnCounts) {
+    boolean[] occupied = new boolean[8];
+    for (int file = 0; file < 8; file++) occupied[file] = pawnCounts[file] > 0;
+    return occupied;
   }
 
   /**
@@ -191,42 +113,25 @@ public class NNUEFeatureExtractor {
         Piece piece = board.getPiece(pos);
         if (piece == null || !(piece instanceof Pawn) || piece.isWhite() != white) continue;
 
-        boolean isPassed = true;
-        // Scan every square ahead on this file and both neighbouring files for enemy pawns.
-        for (int r = row + direction; r >= 0 && r < 8; r += direction) {
-          if (isValidPos(r, col)) {
-            Piece checking = board.getPiece(new Position(r, col));
-            if (checking != null && checking.isWhite() != white && checking instanceof Pawn) {
-              isPassed = false;
-              break;
-            }
-          }
-          if (isValidPos(r, col - 1) && col - 1 >= 0) {
-            Piece checking = board.getPiece(new Position(r, col - 1));
-            if (checking != null && checking.isWhite() != white && checking instanceof Pawn) {
-              isPassed = false;
-              break;
-            }
-          }
-          if (isValidPos(r, col + 1) && col + 1 < 8) {
-            Piece checking = board.getPiece(new Position(r, col + 1));
-            if (checking != null && checking.isWhite() != white && checking instanceof Pawn) {
-              isPassed = false;
-              break;
-            }
-          }
-          if (!isPassed) break;
-        }
-
-        if (isPassed) {
+        if (isPassedPawn(board, row, col, white, direction)) {
           int advancement = white ? (7 - row) : row;
           bonus += 30 - advancement * 3;
-          if (bonus > 200) break;
+          if (bonus > 200) return bonus;
         }
       }
-      if (bonus > 200) break;
     }
     return bonus;
+  }
+
+  private boolean isPassedPawn(Board board, int row, int column, boolean white, int direction) {
+    for (int r = row + direction; r >= 0 && r < 8; r += direction) {
+      for (int c = column - 1; c <= column + 1; c++) {
+        if (!isValidPos(r, c)) continue;
+        Piece piece = board.getPiece(new Position(r, c));
+        if (piece instanceof Pawn && piece.isWhite() != white) return false;
+      }
+    }
+    return true;
   }
 
   /** Returns whether a row/column pair lies on the board. */
@@ -242,38 +147,30 @@ public class NNUEFeatureExtractor {
     Position whiteKing = board.findKing(true);
     Position blackKing = board.findKing(false);
 
-    if (whiteKing == null || blackKing == null) {
-      return;
-    }
+    if (whiteKing == null || blackKing == null) return;
 
     int whiteKingRow = whiteKing.getRow();
     int whiteKingCol = whiteKing.getColumn();
     int blackKingRow = blackKing.getRow();
     int blackKingCol = blackKing.getColumn();
 
-    // Distance between the kings, normalized.
     int manhattanDist =
         Math.abs(whiteKingRow - blackKingRow) + Math.abs(whiteKingCol - blackKingCol);
     features[670] = manhattanDist / 14.0;
 
-    // Same colour complex (+1) or opposite (-1).
     int whiteKingColor = (whiteKingRow + whiteKingCol) & 1;
     int blackKingColor = (blackKingRow + blackKingCol) & 1;
     features[671] = whiteKingColor == blackKingColor ? 1.0 : -1.0;
 
-    // Enemy pieces adjacent to each king.
     features[672] = countAttackersNearKing(board, true, whiteKing) / 8.0;
     features[673] = -countAttackersNearKing(board, false, blackKing) / 8.0;
 
-    // Pawn shield in front of each king.
     features[674] = isKingShielded(board, true, whiteKing) ? 1.0 : 0.0;
     features[675] = isKingShielded(board, false, blackKing) ? -1.0 : 0.0;
 
-    // Safe squares the kings can move to.
     features[676] = calculateKingMobility(board, true, whiteKing) / 8.0;
     features[677] = -calculateKingMobility(board, false, blackKing) / 8.0;
 
-    // Control of the four central squares around each king.
     features[678] = calculateKingCenterControl(board, true) / 4.0;
     features[679] = -calculateKingCenterControl(board, false) / 4.0;
   }
@@ -304,13 +201,11 @@ public class NNUEFeatureExtractor {
     for (int df = -1; df <= 1; df++) {
       int ac = kc + df;
       if (ac < 0 || ac >= 8) continue;
-      for (int r = kr + dir; r >= 0 && r < 8; r += dir) {
-        if (!isValidPos(r, ac)) continue;
+      for (int distance = 1; distance <= 3; distance++) {
+        int r = kr + dir * distance;
+        if (!isValidPos(r, ac)) break;
         Piece piece = board.getPiece(new Position(r, ac));
-        if (piece != null && piece instanceof Pawn && piece.isWhite() == white) {
-          int rankDist = Math.abs(r - kr);
-          if (rankDist >= 1 && rankDist <= 3) return true;
-        }
+        if (piece instanceof Pawn && piece.isWhite() == white) return true;
       }
     }
     return false;
@@ -345,10 +240,12 @@ public class NNUEFeatureExtractor {
       for (int dc = -1; dc <= 1; dc++) {
         int r = k.getRow() + dr;
         int c = k.getColumn() + dc;
-        if (r >= 4 && r <= 5 && c >= 3 && c <= 4) {
-          if (isValidPos(r, c) && !board.isSquareAttacked(new Position(r, c), !white)) {
-            controlCount++;
-          }
+        if (r >= 4
+            && r <= 5
+            && c >= 3
+            && c <= 4
+            && !board.isSquareAttacked(new Position(r, c), !white)) {
+          controlCount++;
         }
       }
     }
@@ -386,11 +283,9 @@ public class NNUEFeatureExtractor {
     out[511] = -features[639];
     out[639] = -features[511];
 
-    // Pawn structure pairs swap and flip sign.
-    swapNegate(features, out, 640, 641); // passed pawns
-    swapNegate(features, out, 642, 643); // isolated pawns
-    swapNegate(features, out, 644, 645); // connected pawns
-    swapNegate(features, out, 646, 647); // backward pawns
+    for (int index : new int[] {640, 642, 644, 646, 672, 674, 676, 678}) {
+      swapNegate(features, out, index, index + 1);
+    }
 
     // Per-file pawn counts: files are preserved under the rank flip, so only signs flip.
     for (int f = 0; f < 8; f++) {
@@ -402,12 +297,6 @@ public class NNUEFeatureExtractor {
     // every square, so whether the kings share a complex does not change either.
     out[670] = features[670];
     out[671] = features[671];
-
-    // King safety pairs swap and flip sign.
-    swapNegate(features, out, 672, 673); // attackers near king
-    swapNegate(features, out, 674, 675); // pawn shield
-    swapNegate(features, out, 676, 677); // mobility
-    swapNegate(features, out, 678, 679); // centre control
 
     // Castling rights swap between colours (files preserved).
     out[680] = -features[682]; // rotated white kingside <- original black kingside
@@ -440,8 +329,7 @@ public class NNUEFeatureExtractor {
     return false;
   }
 
-  /** True when any own pawn sits on a file with no friendly pawn on either neighbouring file. */
-  private static boolean hasBackwardPawn(boolean[] pawnFiles) {
+  private static boolean hasIsolatedPawn(boolean[] pawnFiles) {
     for (int f = 0; f < 8; f++) {
       if (!pawnFiles[f]) continue;
       boolean left = f > 0 && pawnFiles[f - 1];
@@ -457,18 +345,10 @@ public class NNUEFeatureExtractor {
     out[a] = -features[b];
   }
 
-  /** Returns a centre bonus for a king's square (20 on the centre, plus 10 near the edge). */
   private int getKingCenterBonus(Position king) {
     int row = king.getRow();
     int col = king.getColumn();
-    int[][] centerSquares = {{3, 3}, {3, 4}, {4, 3}, {4, 4}};
-    int bonus = 0;
-    for (int[] sq : centerSquares) {
-      if (row == sq[0] && col == sq[1]) {
-        bonus = 20;
-        break;
-      }
-    }
+    int bonus = (row == 3 || row == 4) && (col == 3 || col == 4) ? 20 : 0;
     int distanceFromEdge = Math.min(Math.min(row, 7 - row), Math.min(col, 7 - col));
     if (distanceFromEdge <= 1) bonus += 10;
     return bonus;

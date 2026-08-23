@@ -3,6 +3,7 @@ package chess.board;
 import chess.engine.MoveGenerator;
 import chess.pieces.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -16,6 +17,12 @@ import java.util.Map;
  * counts and a Zobrist hash of the position.
  */
 public class Board {
+
+  private static final int[][] KNIGHT_OFFSETS = {
+    {-2, -1}, {-2, 1}, {-1, -2}, {-1, 2}, {1, -2}, {1, 2}, {2, -1}, {2, 1}
+  };
+  private static final int[][] STRAIGHT_DIRECTIONS = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+  private static final int[][] DIAGONAL_DIRECTIONS = {{-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
 
   private final Piece[][] board;
 
@@ -40,7 +47,8 @@ public class Board {
   /** Zobrist hash of the current position. */
   private long zobristKey;
 
-  // Random but fixed Zobrist keys, one per piece type/square, castling right set and en passant square.
+  // Random but fixed Zobrist keys, one per piece type/square, castling right set and en passant
+  // square.
   private static final long[][] PIECE_KEYS;
   private static final long[] CASTLING_KEYS;
   private static final long[] EN_PASSANT_KEYS;
@@ -74,19 +82,15 @@ public class Board {
   }
 
   /**
-   * Computes the Zobrist hash for the current position by XOR-ing together the keys of every
-   * piece, the castling rights, the en passant square and the side to move.
+   * Computes the Zobrist hash for the current position by XOR-ing together the keys of every piece,
+   * the castling rights, the en passant square and the side to move.
    */
   private long initZobristKey() {
     long key = 0;
     for (int row = 0; row < 8; row++) {
       for (int column = 0; column < 8; column++) {
         Piece piece = board[row][column];
-        if (piece == null) {
-          continue;
-        }
-        int pieceType = pieceTypeIndex(piece);
-        key ^= Board.PIECE_KEYS[pieceType][row * 8 + column];
+        if (piece != null) key ^= PIECE_KEYS[pieceTypeIndex(piece)][row * 8 + column];
       }
     }
     int castling = 0;
@@ -94,15 +98,16 @@ public class Board {
     if (whiteQueensideCastle) castling |= 4;
     if (blackKingsideCastle) castling |= 2;
     if (blackQueensideCastle) castling |= 1;
-    key ^= Board.CASTLING_KEYS[castling];
+    key ^= CASTLING_KEYS[castling];
     if (enPassantTarget != null) {
-      key ^= Board.EN_PASSANT_KEYS[enPassantTarget.getRow() * 8 + enPassantTarget.getColumn()];
+      key ^= EN_PASSANT_KEYS[enPassantTarget.getRow() * 8 + enPassantTarget.getColumn()];
     }
-    key ^= (whiteToMove ? 0 : Board.SIDE_TO_MOVE_KEY);
-    return key;
+    return whiteToMove ? key : key ^ SIDE_TO_MOVE_KEY;
   }
 
-  /** Maps a piece to its Zobrist table index: Pawn=0, Knight=1, Bishop=2, Rook=3, Queen=4, King=5. */
+  /**
+   * Maps a piece to its Zobrist table index: Pawn=0, Knight=1, Bishop=2, Rook=3, Queen=4, King=5.
+   */
   private static int pieceTypeIndex(Piece piece) {
     if (piece instanceof Pawn) return 0;
     if (piece instanceof Knight) return 1;
@@ -131,51 +136,40 @@ public class Board {
     blackKingsideCastle = other.blackKingsideCastle;
     blackQueensideCastle = other.blackQueensideCastle;
 
-    if (other.enPassantTarget != null) {
-      enPassantTarget =
-          new Position(other.enPassantTarget.getRow(), other.enPassantTarget.getColumn());
-    }
-
+    enPassantTarget = other.enPassantTarget;
     halfmoveClock = other.halfmoveClock;
     fullmoveNumber = other.fullmoveNumber;
     repetitionCounts.putAll(other.repetitionCounts);
+    zobristKey = other.zobristKey;
   }
 
   /** Creates a fresh instance of the given piece's exact type. */
   private Piece copyPiece(Piece piece) {
-    if (piece instanceof Pawn) return new Pawn(piece.isWhite());
-    if (piece instanceof Knight) return new Knight(piece.isWhite());
-    if (piece instanceof Bishop) return new Bishop(piece.isWhite());
-    if (piece instanceof Rook) return new Rook(piece.isWhite());
-    if (piece instanceof Queen) return new Queen(piece.isWhite());
-    if (piece instanceof King) return new King(piece.isWhite());
-    return null;
+    return piece == null ? null : createPieceFromSymbol(piece.getSymbol());
   }
 
   /** Places all 32 pieces on their starting squares. */
   private void setupStartingPosition() {
-    board[0][0] = new Rook(false);
-    board[0][1] = new Knight(false);
-    board[0][2] = new Bishop(false);
-    board[0][3] = new Queen(false);
-    board[0][4] = new King(false);
-    board[0][5] = new Bishop(false);
-    board[0][6] = new Knight(false);
-    board[0][7] = new Rook(false);
-
+    setupBackRank(0, false);
     for (int column = 0; column < 8; column++) {
       board[1][column] = new Pawn(false);
       board[6][column] = new Pawn(true);
     }
+    setupBackRank(7, true);
+  }
 
-    board[7][0] = new Rook(true);
-    board[7][1] = new Knight(true);
-    board[7][2] = new Bishop(true);
-    board[7][3] = new Queen(true);
-    board[7][4] = new King(true);
-    board[7][5] = new Bishop(true);
-    board[7][6] = new Knight(true);
-    board[7][7] = new Rook(true);
+  private void setupBackRank(int row, boolean white) {
+    board[row] =
+        new Piece[] {
+          new Rook(white),
+          new Knight(white),
+          new Bishop(white),
+          new Queen(white),
+          new King(white),
+          new Bishop(white),
+          new Knight(white),
+          new Rook(white)
+        };
   }
 
   /** Returns whether it is White's turn. */
@@ -208,7 +202,7 @@ public class Board {
     return getPiece(position) == null;
   }
 
-  /** Returns whether an enemy piece (from {@code white}'s point of view) stands on the square. */
+  /** Returns whether an enemy piece (from white's point of view) stands on the square. */
   public boolean isEnemyPiece(Position position, boolean white) {
     Piece piece = getPiece(position);
     return piece != null && piece.isWhite() != white;
@@ -224,7 +218,7 @@ public class Board {
     return isValid(row, column) && board[row][column] == null;
   }
 
-  /** Returns whether the square holds an enemy piece from {@code white}'s point of view. */
+  /** Returns whether the square holds an enemy piece from white's point of view. */
   public boolean hasEnemyPiece(int row, int column, boolean white) {
     return isValid(row, column)
         && board[row][column] != null
@@ -246,20 +240,8 @@ public class Board {
    * squares, squares between them empty and none of the king's path attacked.
    */
   public boolean canCastleKingside(boolean white) {
-    int row = white ? 7 : 0;
     boolean rights = white ? whiteKingsideCastle : blackKingsideCastle;
-    if (!rights) return false;
-
-    Piece king = board[row][4];
-    Piece rook = board[row][7];
-    if (!(king instanceof King) || king.isWhite() != white) return false;
-    if (!(rook instanceof Rook) || rook.isWhite() != white) return false;
-
-    if (!isEmpty(new Position(row, 5)) || !isEmpty(new Position(row, 6))) return false;
-
-    return !isSquareAttacked(new Position(row, 4), !white)
-        && !isSquareAttacked(new Position(row, 5), !white)
-        && !isSquareAttacked(new Position(row, 6), !white);
+    return canCastle(white, rights, 7, new int[] {5, 6}, new int[] {4, 5, 6});
   }
 
   /**
@@ -267,22 +249,25 @@ public class Board {
    * squares, squares between them empty and none of the king's path attacked.
    */
   public boolean canCastleQueenside(boolean white) {
-    int row = white ? 7 : 0;
     boolean rights = white ? whiteQueensideCastle : blackQueensideCastle;
+    return canCastle(white, rights, 0, new int[] {1, 2, 3}, new int[] {4, 3, 2});
+  }
+
+  private boolean canCastle(
+      boolean white, boolean rights, int rookColumn, int[] emptyColumns, int[] safeColumns) {
     if (!rights) return false;
-
+    int row = white ? 7 : 0;
     Piece king = board[row][4];
-    Piece rook = board[row][0];
-    if (!(king instanceof King) || king.isWhite() != white) return false;
-    if (!(rook instanceof Rook) || rook.isWhite() != white) return false;
-
-    if (!isEmpty(new Position(row, 1))
-        || !isEmpty(new Position(row, 2))
-        || !isEmpty(new Position(row, 3))) return false;
-
-    return !isSquareAttacked(new Position(row, 4), !white)
-        && !isSquareAttacked(new Position(row, 3), !white)
-        && !isSquareAttacked(new Position(row, 2), !white);
+    Piece rook = board[row][rookColumn];
+    if (!(king instanceof King)
+        || king.isWhite() != white
+        || !(rook instanceof Rook)
+        || rook.isWhite() != white) return false;
+    for (int column : emptyColumns) if (!isEmpty(row, column)) return false;
+    for (int column : safeColumns) {
+      if (isSquareAttacked(new Position(row, column), !white)) return false;
+    }
+    return true;
   }
 
   /** Returns the square of the given side's king, or null if it is missing. */
@@ -299,9 +284,9 @@ public class Board {
   }
 
   /**
-   * Returns whether a square is attacked by any piece of the given colour. Checks pawns, knights,
-   * kings and sliding pieces directly instead of generating legal moves, which makes it fast
-   * enough for check detection during search.
+   * Returns whether a square is attacked by any piece of the given color. Checks pawns, knights,
+   * kings and sliding pieces directly instead of generating legal moves, which makes it fast enough
+   * for check detection during search.
    */
   public boolean isSquareAttacked(Position square, boolean byWhite) {
     int targetRow = square.getRow();
@@ -309,26 +294,14 @@ public class Board {
 
     // Pawns attack diagonally "backwards" relative to their movement direction.
     int pawnRow = targetRow + (byWhite ? 1 : -1);
-    if (isValid(pawnRow, targetColumn - 1)) {
-      Piece piece = board[pawnRow][targetColumn - 1];
-      if (piece instanceof Pawn && piece.isWhite() == byWhite) return true;
-    }
-    if (isValid(pawnRow, targetColumn + 1)) {
-      Piece piece = board[pawnRow][targetColumn + 1];
-      if (piece instanceof Pawn && piece.isWhite() == byWhite) return true;
+    for (int offset : new int[] {-1, 1}) {
+      if (hasPiece(pawnRow, targetColumn + offset, byWhite, Pawn.class)) return true;
     }
 
-    // Knights.
-    int[][] knightOffsets = {
-      {-2, -1}, {-2, 1}, {-1, -2}, {-1, 2},
-      {1, -2}, {1, 2}, {2, -1}, {2, 1}
-    };
-    for (int[] offset : knightOffsets) {
-      int row = targetRow + offset[0];
-      int column = targetColumn + offset[1];
-      if (!isValid(row, column)) continue;
-      Piece piece = board[row][column];
-      if (piece instanceof Knight && piece.isWhite() == byWhite) return true;
+    for (int[] offset : KNIGHT_OFFSETS) {
+      if (hasPiece(targetRow + offset[0], targetColumn + offset[1], byWhite, Knight.class)) {
+        return true;
+      }
     }
 
     // Adjacent kings.
@@ -337,29 +310,31 @@ public class Board {
         if (rowOffset == 0 && columnOffset == 0) continue;
         int row = targetRow + rowOffset;
         int column = targetColumn + columnOffset;
-        if (!isValid(row, column)) continue;
-        Piece piece = board[row][column];
-        if (piece instanceof King && piece.isWhite() == byWhite) return true;
+        if (hasPiece(row, column, byWhite, King.class)) return true;
       }
     }
 
-    // Rooks and queens along ranks/files, then bishops and queens along diagonals.
-    if (lineAttacked(targetRow, targetColumn, byWhite, -1, 0, Rook.class)
-        || lineAttacked(targetRow, targetColumn, byWhite, 1, 0, Rook.class)
-        || lineAttacked(targetRow, targetColumn, byWhite, 0, -1, Rook.class)
-        || lineAttacked(targetRow, targetColumn, byWhite, 0, 1, Rook.class)) {
-      return true;
-    }
+    return linesAttacked(targetRow, targetColumn, byWhite, STRAIGHT_DIRECTIONS, Rook.class)
+        || linesAttacked(targetRow, targetColumn, byWhite, DIAGONAL_DIRECTIONS, Bishop.class);
+  }
 
-    return lineAttacked(targetRow, targetColumn, byWhite, -1, -1, Bishop.class)
-        || lineAttacked(targetRow, targetColumn, byWhite, -1, 1, Bishop.class)
-        || lineAttacked(targetRow, targetColumn, byWhite, 1, -1, Bishop.class)
-        || lineAttacked(targetRow, targetColumn, byWhite, 1, 1, Bishop.class);
+  private boolean hasPiece(int row, int column, boolean white, Class<?> type) {
+    if (!isValid(row, column)) return false;
+    Piece piece = board[row][column];
+    return type.isInstance(piece) && piece.isWhite() == white;
+  }
+
+  private boolean linesAttacked(
+      int row, int column, boolean white, int[][] directions, Class<?> type) {
+    for (int[] direction : directions) {
+      if (lineAttacked(row, column, white, direction[0], direction[1], type)) return true;
+    }
+    return false;
   }
 
   /**
-   * Walks outward from a square in one direction until a piece is found; returns whether that
-   * first piece is an enemy slider able to attack along this direction (a rook-type or queen).
+   * Walks outward from a square in one direction until a piece is found; returns whether that first
+   * piece is an enemy slider able to attack along this direction (a rook-type or queen).
    */
   private boolean lineAttacked(
       int targetRow,
@@ -415,25 +390,15 @@ public class Board {
   }
 
   /**
-   * Legacy coordinate API: plays a non-promotion move chosen only by its start and end squares.
-   * For promotions callers must use {@link #playMove(Move)} with a specific Move.
+   * Legacy coordinate API: plays a non-promotion move chosen only by its start and end squares. For
+   * promotions callers must use #playMove(Move) with a specific Move.
    *
    * @return whether a matching legal move existed and was played
    */
   public boolean movePiece(Position start, Position end) {
     Piece piece = getPiece(start);
     if (piece == null || piece.isWhite() != whiteToMove) return false;
-
-    List<Move> candidates = getLegalMoves(start);
-    Move selected = null;
-    for (Move move : candidates) {
-      if (move.getEnd().equals(end)) {
-        if (!move.isPromotion()) {
-          selected = move;
-          break;
-        }
-      }
-    }
+    Move selected = findLegalMove(start, end, '\0');
     if (selected == null) return false;
     playMove(selected);
     return true;
@@ -448,11 +413,8 @@ public class Board {
       if (!move.getEnd().equals(end)) continue;
       if (!move.isPromotion()) return move;
 
-      char choice = Character.toUpperCase(promotionChoice);
-      if (choice == 'Q' && move.getPromotionPiece() instanceof Queen) return move;
-      if (choice == 'R' && move.getPromotionPiece() instanceof Rook) return move;
-      if (choice == 'B' && move.getPromotionPiece() instanceof Bishop) return move;
-      if (choice == 'N' && move.getPromotionPiece() instanceof Knight) return move;
+      if (move.getPromotionPiece().getNotationSymbol() == Character.toUpperCase(promotionChoice))
+        return move;
     }
     return null;
   }
@@ -496,7 +458,7 @@ public class Board {
   /**
    * Applies a move to the piece placement only: moves the piece, handles captures, en passant,
    * castling rook moves and promotions, then updates castling rights and the en passant target.
-   * Counters and repetition state are handled by {@link #playMove}; this method alone is used for
+   * Counters and repetition state are handled by #playMove; this method alone is used for
    * simulation inside search.
    */
   public void makeMove(Move move) {
@@ -623,6 +585,13 @@ public class Board {
   /** Returns whether the same position has occurred at least five times (automatic draw). */
   public boolean isFivefoldRepetition() {
     return getCurrentPositionRepetitionCount() >= 5;
+  }
+
+  public boolean isAutomaticDraw() {
+    return isStalemate(whiteToMove)
+        || isSeventyFiveMoveRule()
+        || isFivefoldRepetition()
+        || isInsufficientMaterial();
   }
 
   /**
@@ -795,48 +764,12 @@ public class Board {
    * counts only when an actual legal en passant capture exists.
    */
   public String getPositionKey() {
-    StringBuilder key = new StringBuilder();
-
-    for (int row = 0; row < 8; row++) {
-      int empty = 0;
-      for (int column = 0; column < 8; column++) {
-        Piece piece = board[row][column];
-        if (piece == null) {
-          empty++;
-        } else {
-          if (empty > 0) {
-            key.append(empty);
-            empty = 0;
-          }
-          key.append(piece.getSymbol());
-        }
-      }
-      if (empty > 0) key.append(empty);
-      if (row < 7) key.append('/');
-    }
-
-    key.append(' ').append(whiteToMove ? 'w' : 'b');
-    key.append(' ');
-    boolean anyRights = false;
-    if (whiteKingsideCastle) {
-      key.append('K');
-      anyRights = true;
-    }
-    if (whiteQueensideCastle) {
-      key.append('Q');
-      anyRights = true;
-    }
-    if (blackKingsideCastle) {
-      key.append('k');
-      anyRights = true;
-    }
-    if (blackQueensideCastle) {
-      key.append('q');
-      anyRights = true;
-    }
-    if (!anyRights) key.append('-');
-    key.append(' ');
-
+    StringBuilder key = new StringBuilder(piecePlacement());
+    key.append(' ')
+        .append(whiteToMove ? 'w' : 'b')
+        .append(' ')
+        .append(castlingRights())
+        .append(' ');
     Position legalEp = getRepetitionEnPassantTarget();
     key.append(legalEp == null ? "-" : legalEp.toAlgebraic());
     return key.toString();
@@ -885,7 +818,21 @@ public class Board {
 
   /** Serialises the position as a FEN string. */
   public String toFEN() {
-    StringBuilder fen = new StringBuilder();
+    return piecePlacement()
+        + " "
+        + (whiteToMove ? 'w' : 'b')
+        + " "
+        + castlingRights()
+        + " "
+        + (enPassantTarget == null ? "-" : enPassantTarget.toAlgebraic())
+        + " "
+        + halfmoveClock
+        + " "
+        + fullmoveNumber;
+  }
+
+  private String piecePlacement() {
+    StringBuilder placement = new StringBuilder();
     for (int row = 0; row < 8; row++) {
       int empty = 0;
       for (int column = 0; column < 8; column++) {
@@ -894,41 +841,25 @@ public class Board {
           empty++;
         } else {
           if (empty > 0) {
-            fen.append(empty);
+            placement.append(empty);
             empty = 0;
           }
-          fen.append(piece.getSymbol());
+          placement.append(piece.getSymbol());
         }
       }
-      if (empty > 0) fen.append(empty);
-      if (row < 7) fen.append('/');
+      if (empty > 0) placement.append(empty);
+      if (row < 7) placement.append('/');
     }
+    return placement.toString();
+  }
 
-    fen.append(' ').append(whiteToMove ? 'w' : 'b');
-    fen.append(' ');
-    boolean anyRights = false;
-    if (whiteKingsideCastle) {
-      fen.append('K');
-      anyRights = true;
-    }
-    if (whiteQueensideCastle) {
-      fen.append('Q');
-      anyRights = true;
-    }
-    if (blackKingsideCastle) {
-      fen.append('k');
-      anyRights = true;
-    }
-    if (blackQueensideCastle) {
-      fen.append('q');
-      anyRights = true;
-    }
-    if (!anyRights) fen.append('-');
-    fen.append(' ');
-    fen.append(enPassantTarget == null ? "-" : enPassantTarget.toAlgebraic());
-    fen.append(' ').append(halfmoveClock);
-    fen.append(' ').append(fullmoveNumber);
-    return fen.toString();
+  private String castlingRights() {
+    String rights =
+        (whiteKingsideCastle ? "K" : "")
+            + (whiteQueensideCastle ? "Q" : "")
+            + (blackKingsideCastle ? "k" : "")
+            + (blackQueensideCastle ? "q" : "");
+    return rights.isEmpty() ? "-" : rights;
   }
 
   /**
@@ -970,11 +901,7 @@ public class Board {
 
   /** Empties every square of the board. */
   private void clearBoard() {
-    for (int row = 0; row < 8; row++) {
-      for (int column = 0; column < 8; column++) {
-        board[row][column] = null;
-      }
-    }
+    for (Piece[] row : board) Arrays.fill(row, null);
   }
 
   /** Reads the piece-placement field of a FEN string onto the board. */
@@ -1006,22 +933,15 @@ public class Board {
   /** Converts a single FEN piece letter into a fresh piece instance. */
   private static Piece createPieceFromSymbol(char symbol) {
     boolean white = Character.isUpperCase(symbol);
-    switch (Character.toLowerCase(symbol)) {
-      case 'p':
-        return new Pawn(white);
-      case 'n':
-        return new Knight(white);
-      case 'b':
-        return new Bishop(white);
-      case 'r':
-        return new Rook(white);
-      case 'q':
-        return new Queen(white);
-      case 'k':
-        return new King(white);
-      default:
-        throw new IllegalArgumentException("Invalid FEN piece: " + symbol);
-    }
+    return switch (Character.toLowerCase(symbol)) {
+      case 'p' -> new Pawn(white);
+      case 'n' -> new Knight(white);
+      case 'b' -> new Bishop(white);
+      case 'r' -> new Rook(white);
+      case 'q' -> new Queen(white);
+      case 'k' -> new King(white);
+      default -> throw new IllegalArgumentException("Invalid FEN piece: " + symbol);
+    };
   }
 
   /** Converts algebraic coordinates like "e4" into a Position. */
@@ -1034,35 +954,22 @@ public class Board {
   /** Prints the board to the console from the perspective of the given player. */
   public void printBoard(boolean playerIsWhite) {
     System.out.println();
-    if (playerIsWhite) printWhiteOrientation();
-    else printBlackOrientation();
+    String files =
+        playerIsWhite ? "    a   b   c   d   e   f   g   h" : "    h   g   f   e   d   c   b   a";
+    System.out.println(files);
+    System.out.println("  +---+---+---+---+---+---+---+---+");
+    int start = playerIsWhite ? 0 : 7;
+    int step = playerIsWhite ? 1 : -1;
+    for (int row = start; row >= 0 && row < 8; row += step) {
+      System.out.print((8 - row) + " | ");
+      for (int column = start; column >= 0 && column < 8; column += step) {
+        printSquare(row, column);
+      }
+      System.out.println();
+      System.out.println("  +---+---+---+---+---+---+---+---+");
+    }
+    System.out.println(files);
     System.out.println();
-  }
-
-  /** Prints the board with White at the bottom. */
-  private void printWhiteOrientation() {
-    System.out.println("    a   b   c   d   e   f   g   h");
-    System.out.println("  +---+---+---+---+---+---+---+---+");
-    for (int row = 0; row < 8; row++) {
-      System.out.print((8 - row) + " | ");
-      for (int column = 0; column < 8; column++) printSquare(row, column);
-      System.out.println();
-      System.out.println("  +---+---+---+---+---+---+---+---+");
-    }
-    System.out.println("    a   b   c   d   e   f   g   h");
-  }
-
-  /** Prints the board with Black at the bottom. */
-  private void printBlackOrientation() {
-    System.out.println("    h   g   f   e   d   c   b   a");
-    System.out.println("  +---+---+---+---+---+---+---+---+");
-    for (int row = 7; row >= 0; row--) {
-      System.out.print((8 - row) + " | ");
-      for (int column = 7; column >= 0; column--) printSquare(row, column);
-      System.out.println();
-      System.out.println("  +---+---+---+---+---+---+---+---+");
-    }
-    System.out.println("    h   g   f   e   d   c   b   a");
   }
 
   /** Prints one square followed by its cell border. */

@@ -29,10 +29,10 @@ The evaluation function combines material and positional factors.
 
 ### Learning from Games
 
-The engine's neural evaluation (NNUE) is trained on complete chess GAMES, not on individually
-labelled positions. Every PGN game supplies one supervision signal -- its final result -- and every
-position in that game is trained to predict which side the game belonged to (+1 win, 0 draw, -1
-loss from the side to move's perspective). No external engine such as Stockfish is involved.
+The engine's neural evaluation (NNUE) is trained from complete PGN games. Searched self-play moves
+carry a centipawn evaluation, which is blended with the final game result to create dense position
+labels. Older PGNs without evaluations still contribute lower-weight result labels. No external
+engine such as Stockfish is involved.
 
 The training pipeline lives in `chess.engine.training`:
 
@@ -46,15 +46,14 @@ Lichess API ──► LichessGameDownloader┘      (or drop any PGN)         �
                                         SearchEngine ──► Evaluator ──► NNUEEvaluator
 ```
 
-- `SelfPlayGenerator` -- plays engine-vs-engine games IN PARALLEL from random opening book lines
-  with a small amount of early-move randomness, adjudicates clearly decided endgames by material,
-  and writes standard PGN batches (including results) to `games/selfplay/`.
+- `SelfPlayGenerator` -- plays engine-vs-engine games in parallel from varied established opening
+  lines, selects every post-book move through search, adjudicates clearly decided endgames by
+  material, and writes annotated PGN batches to `games/selfplay/`.
 - `LichessGameDownloader` -- optionally downloads recent games of strong players as whole PGN files
   into `games/lichess/`.
-- `GameTrainer` -- parses and replays every PGN under `games/`, trains the network against game
-  outcomes with mini-batch SGD, validates on held-out games (the split is per game so positions of
-  one game never leak between sets), and saves the best network to `nnue_weights.bin`, which the
-  engine loads automatically.
+- `GameTrainer` -- only parses and trains from PGNs already under `games/`; it never creates games.
+  It rejects invalid timeout evaluations, validates on current held-out games, and protects the best
+  checkpoint in `nnue_weights_best.bin`, which the engine loads automatically.
 - `TrainingPipeline` -- runs the full self-improvement loop: generate games with the current
   network, train, repeat. Each iteration's games are played with the weights trained in the previous
   iteration, so evaluation quality compounds.
@@ -62,11 +61,11 @@ Lichess API ──► LichessGameDownloader┘      (or drop any PGN)         �
 Training commands:
 
 ```bash
-# Full self-improvement run (defaults: 10 iterations x 256 games, 200 ms/move, half the cores)
+# Full self-improvement run (defaults: 3 hours, 256 games/batch, 200 ms/move, half the cores)
 java -cp build/classes/java/main chess.engine.training.TrainingPipeline
 
-# Custom: 20 iterations x 512 games, 300 ms/move, 8 threads, 40 epochs each
-java -cp build/classes/java/main chess.engine.training.TrainingPipeline 20 512 300 8 40
+# Custom: 8 hours, 512 games/batch, 300 ms/move, 8 threads, 40 epochs/stage
+java -cp build/classes/java/main chess.engine.training.TrainingPipeline 8 512 300 8 40
 
 # Only generate games (defaults: 256 games, 200 ms per move)
 java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator
@@ -74,7 +73,7 @@ java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator
 # Download human games instead (optional)
 java -cp build/classes/java/main chess.engine.training.LichessGameDownloader 100
 
-# Train once from all games found in games/ (auto-generates self-play if none exist)
+# Train once from all games already found in games/ (fails clearly if none exist)
 java -cp build/classes/java/main chess.engine.training.GameTrainer 40
 ```
 

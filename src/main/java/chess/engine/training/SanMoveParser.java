@@ -4,18 +4,13 @@ import chess.board.Board;
 import chess.board.Move;
 import chess.board.Position;
 import chess.pieces.Piece;
-import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Resolves a SAN token (e.g. Nbd2, exd5, O-O, e8=Q) to the corresponding legal {@link Move} on a
- * {@link Board}. Used to replay PGN games for game-based training.
- */
+/** Resolves SAN notation to a legal move. */
 public final class SanMoveParser {
 
   private SanMoveParser() {}
 
-  /** Returns the unique legal move matching the SAN, or null when it cannot be resolved. */
   public static Move parse(Board board, String rawSan) {
     String san = normalize(rawSan);
     if (san.isEmpty()) return null;
@@ -61,7 +56,7 @@ public final class SanMoveParser {
     if (prefix.length() > 2) return null;
     String disambiguation = prefix;
 
-    List<Move> matches = new ArrayList<>();
+    Move selected = null;
     for (Move move : legalMoves) {
       if (!move.getEnd().equals(destination)) continue;
       Piece piece = board.getPiece(move.getStart());
@@ -75,12 +70,11 @@ public final class SanMoveParser {
         continue;
       }
       if (!matchesDisambiguation(move, disambiguation)) continue;
-      matches.add(move);
+      if (selected != null) return null;
+      selected = move;
     }
 
-    if (matches.size() != 1) return null;
-
-    Move selected = matches.get(0);
+    if (selected == null) return null;
     String actual = board.formatMove(selected);
     if (suppliedMate && !actual.endsWith("#")) return null;
     if (suppliedCheck && !(actual.endsWith("+") || actual.endsWith("#"))) return null;
@@ -88,10 +82,7 @@ public final class SanMoveParser {
   }
 
   private static String normalize(String input) {
-    String s = input.trim();
-    s = s.replace('0', 'O');
-    s = s.replace('−', '-');
-    s = s.replace('–', '-');
+    String s = input.trim().replace('0', 'O').replace('−', '-').replace('–', '-');
     s = s.replaceAll("\\s+", "");
     while (s.endsWith("!") || s.endsWith("?")) {
       s = s.substring(0, s.length() - 1);
@@ -100,10 +91,10 @@ public final class SanMoveParser {
   }
 
   private static Move castlingMove(List<Move> legalMoves, int endColumn) {
-    for (Move move : legalMoves) {
-      if (move.isCastling() && move.getEnd().getColumn() == endColumn) return move;
-    }
-    return null;
+    return legalMoves.stream()
+        .filter(move -> move.isCastling() && move.getEnd().getColumn() == endColumn)
+        .findFirst()
+        .orElse(null);
   }
 
   private static Position parseSquare(String square) {
@@ -116,9 +107,8 @@ public final class SanMoveParser {
     if (disambiguation.isEmpty()) return true;
     char file = (char) ('a' + move.getStart().getColumn());
     char rank = (char) ('8' - move.getStart().getRow());
-    if (disambiguation.length() == 1) {
+    if (disambiguation.length() == 1)
       return disambiguation.charAt(0) == file || disambiguation.charAt(0) == rank;
-    }
     return disambiguation.charAt(0) == file && disambiguation.charAt(1) == rank;
   }
 }

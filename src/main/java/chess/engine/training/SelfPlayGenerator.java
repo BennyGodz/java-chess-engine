@@ -10,7 +10,6 @@ import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -18,33 +17,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Generates training GAMES by letting the engine play against itself.
- *
- * <p>This is the data source for {@link GameTrainer}: every finished game is stored as a PGN file
- * including its result, and the trainer learns from whole games rather than individually labelled
- * positions.
- *
- * <p>Every move chosen by search is annotated with its ROOT SCORE as a comment ({@code e4 { ev 34
- * }}), centipawns from the mover's perspective. The score costs nothing extra — the search already
- * computed it to pick the move — and it gives the trainer dense, low-noise supervision that plain
- * game results cannot: two engines of equal strength produce near-random outcomes, but their search
- * evaluations are stable position facts. See GameTrainer's target blending.
- *
- * <p>Games are played IN PARALLEL, one independent engine per worker thread, which makes large
- * datasets (hundreds of games per iteration) practical.
- *
- * <p>Diversity and data quality come from:
- *
- * <ul>
- *   <li>A random opening line from the built-in book starts every game.
- *   <li>A small amount of random early moves keeps the pool varied.
- *   <li>Searches are deep enough that games are decided by play, not by blunders.
- *   <li>Clearly decided endgames are adjudicated by material so dead games do not drag on.
- * </ul>
- *
- * <p>Usage: {@code SelfPlayGenerator [games] [timePerMoveMs] [threads]}
- */
+/** Generates annotated self-play games for {@link GameTrainer}. */
 public final class SelfPlayGenerator {
 
   static final String GAMES_DIR = "games" + File.separator + "selfplay";
@@ -55,21 +28,8 @@ public final class SelfPlayGenerator {
   private static final int SEARCH_DEPTH = 7;
   private static final int MAX_PLIES = 240;
   private static final int OPENING_PLIES = 10;
-  private static final int RANDOM_MOVE_PLIES = 12;
-  private static final double RANDOM_MOVE_PROBABILITY = 0.10;
 
-  /**
-   * Root scores beyond this many centipawns (forced mates and their defences) are clamped before
-   * being written, so evaluation comments stay inside a sane regression range.
-   */
-  private static final int EVAL_COMMENT_CLAMP_CP = 1000;
-
-  /*
-   * Adjudication: after this many plies a game whose material
-   * difference exceeds the threshold is scored accordingly instead
-   * of being played to the ply limit. This removes long, uninformative
-   * endgames from the dataset while keeping their (obvious) result.
-   */
+  private static final int EVAL_COMMENT_CLAMP_CP = 900;
   private static final int ADJUDICATION_PLY = 140;
   private static final int ADJUDICATION_THRESHOLD_CP = 400;
 
@@ -111,7 +71,6 @@ public final class SelfPlayGenerator {
     }
   }
 
-  /** Plays the configured number of games in parallel and appends them to a PGN batch file. */
   public List<File> generate() throws IOException {
     File dir = new File(GAMES_DIR);
     Files.createDirectories(dir.toPath());
@@ -140,17 +99,13 @@ public final class SelfPlayGenerator {
 
     List<Future<String>> futures = new ArrayList<>();
     for (int gameIndex = 0; gameIndex < targetGames; gameIndex++) {
-      /*
-       * Each game gets its own engine, board and RNG, so no shared
-       * mutable state is ever touched by two threads at once.
-       */
       Random gameRandom = new Random(seed + gameIndex * 7919L);
       List<String> openingLine = lines.get(gameRandom.nextInt(lines.size()));
 
       futures.add(
           executor.submit(
               () -> {
-                String pgn = playAndRecord(openingLine, gameRandom);
+                String pgn = playAndRecord(openingLine);
                 int done = completed.incrementAndGet();
                 synchronized (System.out) {
                   System.out.printf("Game %d/%d finished.%n", done, targetGames);
@@ -184,16 +139,11 @@ public final class SelfPlayGenerator {
     return List.of(outputFile);
   }
 
-  /** Plays one complete game with a dedicated engine instance and returns it as PGN text. */
-  private String playAndRecord(List<String> openingLine, Random random) {
-    SearchEngine engine = new SearchEngine(); // loads the current NNUE weights
+  private String playAndRecord(List<String> openingLine) {
+    SearchEngine engine = new SearchEngine();
     Board board = new Board();
     List<String> sanMoves = new ArrayList<>();
-    /*
-     * Root score (centipawns, mover perspective) per recorded move; null for book and random
-     * moves, which carry no meaningful evaluation.
-     */
-    Double[] moveScores = new Double[64];
+    List<Double> moveScores = new ArrayList<>();
     int openingPlies = Math.min(openingLine.size(), OPENING_PLIES);
 
     String result;
@@ -207,10 +157,7 @@ public final class SelfPlayGenerator {
         termination = "checkmate";
         break;
       }
-      if (board.isStalemate(whiteToMove)
-          || board.isInsufficientMaterial()
-          || board.isSeventyFiveMoveRule()
-          || board.isFivefoldRepetition()) {
+      if (board.isStalemate(whiteToMove) || board.isAutomaticDraw()) {
         result = "1/2-1/2";
         termination = "automatic draw";
         break;
@@ -231,17 +178,14 @@ public final class SelfPlayGenerator {
         break;
       }
 
-      SelectedMove selected = selectMove(board, engine, ply, openingLine, openingPlies, random);
+      SelectedMove selected = selectMove(board, engine, ply, openingLine, openingPlies);
       if (selected == null || selected.move() == null) {
         result = "1/2-1/2";
         termination = "no legal move";
         break;
       }
 
-      if (ply >= moveScores.length) {
-        moveScores = Arrays.copyOf(moveScores, moveScores.length * 2);
-      }
-      moveScores[ply] = selected.rootScoreCp();
+      moveScores.add(selected.rootScoreCp());
       sanMoves.add(board.formatMove(selected.move()));
       board.playMove(selected.move());
     }
@@ -249,34 +193,21 @@ public final class SelfPlayGenerator {
     return toPgn(sanMoves, moveScores, result, termination);
   }
 
-  /** A chosen move plus the root search score that justified it ({@code null} when not searched). */
   private record SelectedMove(Move move, Double rootScoreCp) {}
 
   private SelectedMove selectMove(
-      Board board,
-      SearchEngine engine,
-      int ply,
-      List<String> openingLine,
-      int openingPlies,
-      Random random) {
+      Board board, SearchEngine engine, int ply, List<String> openingLine, int openingPlies) {
 
     if (ply < openingPlies) {
       Move bookMove = SanMoveParser.parse(board, openingLine.get(ply));
       if (bookMove != null) return new SelectedMove(bookMove, null);
     }
 
-    if (ply < RANDOM_MOVE_PLIES && random.nextDouble() < RANDOM_MOVE_PROBABILITY) {
-      List<Move> legal = board.getLegalMoves(board.isWhiteToMove());
-      if (!legal.isEmpty()) return new SelectedMove(legal.get(random.nextInt(legal.size())), null);
-    }
-
     SearchEngine.SearchResult searchResult =
         engine.findBestMove(board, SEARCH_DEPTH, timePerMoveMs);
     if (searchResult.bestMove() == null) return new SelectedMove(null, null);
 
-    int score = searchResult.score();
-    if (score > EVAL_COMMENT_CLAMP_CP) score = EVAL_COMMENT_CLAMP_CP;
-    else if (score < -EVAL_COMMENT_CLAMP_CP) score = -EVAL_COMMENT_CLAMP_CP;
+    int score = Math.clamp(searchResult.score(), -EVAL_COMMENT_CLAMP_CP, EVAL_COMMENT_CLAMP_CP);
     return new SelectedMove(searchResult.bestMove(), (double) score);
   }
 
@@ -302,7 +233,7 @@ public final class SelfPlayGenerator {
   }
 
   private static String toPgn(
-      List<String> sanMoves, Double[] moveScores, String result, String termination) {
+      List<String> sanMoves, List<Double> moveScores, String result, String termination) {
     StringBuilder pgn = new StringBuilder();
     LocalDate now = LocalDate.now();
     String date =
@@ -326,12 +257,8 @@ public final class SelfPlayGenerator {
         pgn.append(i / 2 + 1).append(". ");
       }
       pgn.append(sanMoves.get(i));
-      /*
-       * Evaluation comment keyed to the position the move was played FROM (mover perspective,
-       * centipawns). PgnGame aligns comments to their preceding SAN token by document order.
-       */
-      if (moveScores != null && i < moveScores.length && moveScores[i] != null) {
-        pgn.append(" { ev ").append(moveScores[i].intValue()).append(" }");
+      if (moveScores.get(i) != null) {
+        pgn.append(" { ev ").append(moveScores.get(i).intValue()).append(" }");
       }
       pgn.append(' ');
     }

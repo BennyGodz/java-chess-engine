@@ -4,28 +4,19 @@ import chess.board.Board;
 import java.io.File;
 import java.io.IOException;
 
-/**
- * Bridges the NNUE network into the engine's evaluation.
- *
- * <p>The network is trained to predict outcomes from the SIDE TO MOVE's perspective (see
- * GameTrainer), but the evaluator and search work in WHITE-perspective centipawns and negate for
- * Black themselves. This class performs that sign conversion.
- */
+/** Converts the network's side-to-move score to White-perspective centipawns. */
 public class NNUEEvaluator {
 
-  /** Weight files tried in order, relative to the working directory. */
   private static final String[] WEIGHT_CANDIDATES = {
     "nnue_weights_best.bin", "nnue_weights.bin", "nnue.weights"
   };
 
   private final NNUE nnue;
 
-  /** Creates an evaluator, loading the default weights file if one exists. */
   public NNUEEvaluator() {
     this(loadDefaultWeights());
   }
 
-  /** Creates an evaluator from a specific weights file. */
   public NNUEEvaluator(File weightsFile) {
     try {
       this.nnue = NNUE.load(weightsFile);
@@ -34,12 +25,10 @@ public class NNUEEvaluator {
     }
   }
 
-  /** Creates an evaluator around an already loaded network. */
   public NNUEEvaluator(NNUE nnue) {
     this.nnue = nnue;
   }
 
-  /** Evaluates in centipawns from White's perspective. */
   public int evaluate(Board board) {
     int sideToMoveScore = nnue.evaluate(board);
     return board.isWhiteToMove() ? sideToMoveScore : -sideToMoveScore;
@@ -47,7 +36,8 @@ public class NNUEEvaluator {
 
   /**
    * Tries the known weight filenames in the project root; when none can be loaded, falls back to a
-   * randomly initialized network with a warning.
+   * zero-output network with a warning. The engine's material evaluation remains active, while a
+   * missing model can never inject random scores into move selection.
    */
   private static NNUE loadDefaultWeights() {
     for (String name : WEIGHT_CANDIDATES) {
@@ -57,11 +47,10 @@ public class NNUEEvaluator {
         System.out.println("Loaded NNUE weights: " + file.getPath());
         return NNUE.load(file);
       } catch (IOException ignored) {
-        // Try the next candidate.
       }
     }
     System.err.println(
-        "WARNING: No NNUE weights found. Using random weights — run GameTrainer first.");
-    return new NNUE(NNUEWeights.random());
+        "WARNING: No NNUE weights found. Using material evaluation only — run GameTrainer first.");
+    return new NNUE(new NNUEWeights());
   }
 }

@@ -4,16 +4,9 @@ import chess.board.Board;
 import java.io.File;
 import java.io.IOException;
 
-/**
- * Runs a trained neural network over a board position.
- *
- * <p>The network is trained to predict the game outcome from the side to move's perspective; this
- * class converts that output to White-perspective centipawns, which is what the rest of the engine
- * expects.
- */
+/** Runs the trained network and returns side-to-move centipawns. */
 public class NNUE {
 
-  /** Output of tanh() in [-1, 1] scaled up to centipawns. */
   private static final int OUTPUT_SCALE = 400;
 
   /**
@@ -38,10 +31,6 @@ public class NNUE {
     extractor = new NNUEFeatureExtractor();
   }
 
-  /**
-   * Evaluates the board through the network: features are extracted, pushed through three ReLU
-   * hidden layers, squashed by tanh and scaled to centipawns from the side to move's perspective.
-   */
   public int evaluate(Board board) {
     double[] features = extractor.extract(board);
     double[][] buffers = scratch.get();
@@ -56,51 +45,36 @@ public class NNUE {
         if (features[i] != 0.0) sum += features[i] * weights.inputWeights[i][h];
       }
 
-      hidden[h] = relu(sum);
+      hidden[h] = Math.max(0.0, sum);
     }
 
-    for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++) {
-      double sum = weights.secondHiddenBias[h2];
-
-      for (int h = 0; h < NNUEWeights.HIDDEN_SIZE; h++)
-        sum += hidden[h] * weights.hiddenWeights[h][h2];
-
-      hidden2[h2] = relu(sum);
-    }
-
-    for (int h3 = 0; h3 < NNUEWeights.THIRD_HIDDEN_SIZE; h3++) {
-      double sum = weights.thirdHiddenBias[h3];
-
-      for (int h2 = 0; h2 < NNUEWeights.SECOND_HIDDEN_SIZE; h2++)
-        sum += hidden2[h2] * weights.secondHiddenWeights[h2][h3];
-
-      hidden3[h3] = relu(sum);
-    }
+    denseLayer(hidden, weights.hiddenWeights, weights.secondHiddenBias, hidden2);
+    denseLayer(hidden2, weights.secondHiddenWeights, weights.thirdHiddenBias, hidden3);
 
     double output = weights.outputBias;
 
-    for (int h3 = 0; h3 < NNUEWeights.THIRD_HIDDEN_SIZE; h3++)
-      output += hidden3[h3] * weights.outputWeights[h3];
+    for (int i = 0; i < hidden3.length; i++) output += hidden3[i] * weights.outputWeights[i];
 
     return (int) Math.round(Math.tanh(output) * OUTPUT_SCALE);
   }
 
-  /** Rectified linear unit used on all hidden layers. */
-  private static double relu(double x) {
-    return Math.max(0.0, x);
+  private static void denseLayer(
+      double[] input, double[][] matrix, double[] bias, double[] output) {
+    for (int j = 0; j < output.length; j++) {
+      double sum = bias[j];
+      for (int i = 0; i < input.length; i++) sum += input[i] * matrix[i][j];
+      output[j] = Math.max(0.0, sum);
+    }
   }
 
-  /** Returns the network's weights, e.g. for training or copying. */
   public NNUEWeights getWeights() {
     return weights;
   }
 
-  /** Writes the current weights to a binary file. */
   public void save(File file) throws IOException {
     weights.save(file);
   }
 
-  /** Loads a network from a binary weights file. */
   public static NNUE load(File file) throws IOException {
     return new NNUE(NNUEWeights.load(file));
   }

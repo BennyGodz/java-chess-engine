@@ -21,43 +21,24 @@ public class LichessClient {
   }
 
   public void acceptChallenge(String challengeId) throws IOException, InterruptedException {
-
-    HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create("https://lichess.org/api/challenge/" + challengeId + "/accept"))
-            .header("Authorization", "Bearer " + token)
-            .POST(HttpRequest.BodyPublishers.noBody())
-            .build();
-
-    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-    if (response.statusCode() != 200) {
-      throw new IOException(
-          "Failed to accept challenge. HTTP " + response.statusCode() + ": " + response.body());
-    }
+    post("challenge/" + challengeId + "/accept", "Failed to accept challenge");
   }
 
   public void makeMove(String gameId, String uciMove) throws IOException, InterruptedException {
+    post("bot/game/" + gameId + "/move/" + uciMove, "Failed to make move " + uciMove);
+    System.out.println("Lichess accepted move: " + uciMove);
+  }
 
+  private void post(String path, String error) throws IOException, InterruptedException {
     HttpRequest request =
         HttpRequest.newBuilder()
-            .uri(URI.create("https://lichess.org/api/bot/game/" + gameId + "/move/" + uciMove))
+            .uri(URI.create("https://lichess.org/api/" + path))
             .header("Authorization", "Bearer " + token)
             .POST(HttpRequest.BodyPublishers.noBody())
             .build();
-
     HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
     if (response.statusCode() != 200) {
-      throw new IOException(
-          "Failed to make move "
-              + uciMove
-              + ". HTTP "
-              + response.statusCode()
-              + ": "
-              + response.body());
+      throw new IOException(error + ". HTTP " + response.statusCode() + ": " + response.body());
     }
-
-    System.out.println("Lichess accepted move: " + uciMove);
   }
 }
