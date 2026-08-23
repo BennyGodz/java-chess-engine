@@ -25,6 +25,7 @@ public class SearchEngine {
   private static final int MAX_CHECK_EXTENSIONS = 4;
   private static final int MAX_QUIESCENCE_DEPTH = 16;
   private static final int PROMOTION_EXTENSION = 1;
+  private static final int ROOT_REPETITION_PENALTY = 30;
 
   private final Evaluator evaluator;
   private long nodes;
@@ -124,7 +125,9 @@ public class SearchEngine {
         return new RootResult(move, MATE_SCORE);
       }
 
-      int score = white ? evaluator.evaluate(child) : -evaluator.evaluate(child);
+      int score =
+          (white ? evaluator.evaluate(child) : -evaluator.evaluate(child))
+              - repetitionPenalty(child);
       if (score > bestScore) {
         bestMove = move;
         bestScore = score;
@@ -164,13 +167,22 @@ public class SearchEngine {
       if (i == 0) {
         score = -negamax(child, childDepth, -beta, -alpha, 1, givesCheck ? 1 : 0, true);
       } else {
+        int requiredRawScore = alpha + repetitionPenalty(child);
         int nullScore =
-            -negamax(child, childDepth, -alpha - 1, -alpha, 1, givesCheck ? 1 : 0, true);
+            -negamax(
+                child,
+                childDepth,
+                -requiredRawScore - 1,
+                -requiredRawScore,
+                1,
+                givesCheck ? 1 : 0,
+                true);
         score =
-            nullScore > alpha
+            nullScore > requiredRawScore
                 ? -negamax(child, childDepth, -beta, -alpha, 1, givesCheck ? 1 : 0, true)
                 : nullScore;
       }
+      score -= repetitionPenalty(child);
 
       if (score > bestScore) {
         bestScore = score;
@@ -183,10 +195,9 @@ public class SearchEngine {
   }
 
   /**
-   * Negamax alpha-beta search. Returns the score from the point of view of the side to move. Probes
-   * the transposition table before generating moves, handles terminal states (mate, stalemate and
-   * the five draw rules), prunes with null moves, extends forcing moves and records killer/history
-   * data on beta cutoffs.
+   * Negamax alpha-beta search. Returns the score from the point of view of the side to move. It
+   * handles terminal states before using cached scores, prunes with null moves, extends forcing
+   * moves and records killer/history data on beta cutoffs.
    */
   private int negamax(
       Board board,
@@ -200,22 +211,23 @@ public class SearchEngine {
     checkTime();
 
     boolean side = board.isWhiteToMove();
-    long positionKey = board.getZobristKey();
-    int ttIndex = (int) (positionKey ^ (positionKey >>> 32)) & TT_MASK;
-    TTEntry ttEntry = tt[ttIndex];
-
-    if (ttEntry != null && ttEntry.key == positionKey && ttEntry.depth >= depth) {
-      if (ttEntry.flag == TTFlag.EXACT) return ttEntry.score;
-      if (ttEntry.flag == TTFlag.ALPHA && ttEntry.score <= alpha) return alpha;
-      if (ttEntry.flag == TTFlag.BETA && ttEntry.score >= beta) return beta;
-    }
-
     List<Move> moves = board.getLegalMoves(side);
     if (moves.isEmpty()) {
       return board.isInCheck(side) ? -MATE_SCORE + ply : 0;
     }
     if (isDraw(board)) return 0;
     if (depth <= 0) return quiescence(board, alpha, beta, ply, 0);
+
+    boolean useTranspositionTable = isTranspositionSafe(board);
+    long positionKey = transpositionKey(board);
+    int ttIndex = (int) (positionKey ^ (positionKey >>> 32)) & TT_MASK;
+    TTEntry ttEntry = useTranspositionTable ? tt[ttIndex] : null;
+
+    if (ttEntry != null && ttEntry.key == positionKey && ttEntry.depth >= depth) {
+      if (ttEntry.flag == TTFlag.EXACT) return ttEntry.score;
+      if (ttEntry.flag == TTFlag.ALPHA && ttEntry.score <= alpha) return alpha;
+      if (ttEntry.flag == TTFlag.BETA && ttEntry.score >= beta) return beta;
+    }
 
     /*
      * Null move pruning: pass the turn and search at reduced depth. A fail-high reply means the
@@ -290,7 +302,9 @@ public class SearchEngine {
     TTFlag flag = TTFlag.EXACT;
     if (bestScore <= originalAlpha) flag = TTFlag.ALPHA;
     else if (bestScore >= beta) flag = TTFlag.BETA;
-    tt[ttIndex] = new TTEntry(positionKey, depth, bestScore, flag, bestMove);
+    if (useTranspositionTable) {
+      tt[ttIndex] = new TTEntry(positionKey, depth, bestScore, flag, bestMove);
+    }
 
     return bestScore;
   }
@@ -359,6 +373,20 @@ public class SearchEngine {
         || board.isFiftyMoveRule()
         || board.isThreefoldRepetition()
         || board.isInsufficientMaterial();
+  }
+
+  static int repetitionPenalty(Board board) {
+    return Math.max(0, board.getCurrentPositionRepetitionCount() - 1) * ROOT_REPETITION_PENALTY;
+  }
+
+  static boolean isTranspositionSafe(Board board) {
+    return board.getCurrentPositionRepetitionCount() <= 1;
+  }
+
+  private static long transpositionKey(Board board) {
+    long halfmove = (board.getHalfmoveClock() + 1L) * 0x9E3779B97F4A7C15L;
+    halfmove = (halfmove ^ (halfmove >>> 30)) * 0xBF58476D1CE4E5B9L;
+    return board.getZobristKey() ^ halfmove ^ (halfmove >>> 27);
   }
 
   private void decayHistory() {

@@ -171,3 +171,5 @@
 2026-08-22 22:58:39 | NEW BEST  | valMse 0.0499 | evalMse 0.0278 | resultOnlyMse 0.1709 | prevAllTime 0.0500 | baseline 0.1974 | trainEx 505008 | valEx 18649 | games 38153
 2026-08-22 22:59:03 | NEW BEST  | valMse 0.0499 | evalMse 0.0278 | resultOnlyMse 0.1707 | prevAllTime 0.0499 | baseline 0.1974 | trainEx 505008 | valEx 18649 | games 38153
 2026-08-22 23:01:01 | RUN DONE  | runBest 0.0499 | evalMse 0.0278 | resultOnlyMse 0.1707 | allTime 0.0499 | baseline 0.1974 | epochs 16 | games 38153
+2026-08-22 23:21:11 | NEW BEST  | valMse 0.0544 | evalMse 0.0281 | resultOnlyMse 0.1582 | prevAllTime 0.0545 | baseline 0.2000 | trainEx 516160 | valEx 20398 | games 38460
+2026-08-22 23:23:39 | RUN DONE  | runBest 0.0544 | evalMse 0.0281 | resultOnlyMse 0.1582 | allTime 0.0544 | baseline 0.2000 | epochs 16 | games 38460

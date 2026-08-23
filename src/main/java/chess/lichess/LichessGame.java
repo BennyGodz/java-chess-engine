@@ -133,10 +133,17 @@ public class LichessGame {
   }
 
   private long calculateSearchTime() {
-    long myTime = botIsWhite ? wtimeMs : btimeMs;
-    long myInc = botIsWhite ? wincMs : bincMs;
-    if (myTime <= 0) return 100;
-    return Math.clamp(myTime / 40 + myInc * 3 / 4, 100, myTime > 600000 ? 30000 : 5000);
+    long time = botIsWhite ? wtimeMs : btimeMs;
+    long increment = botIsWhite ? wincMs : bincMs;
+
+    if (time <= 0) return 20;
+
+    long reserve = Math.max(100, Math.min(1_000, time / 20));
+    long available = Math.max(1, time - reserve);
+    long target = time / 40 + increment * 3 / 4;
+    long maximum = time > 600_000 ? 30_000 : 5_000;
+
+    return Math.clamp(target, Math.min(20, available), Math.min(maximum, available));
   }
 
   private void rebuildBoardFromMoves(String moves) {

@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.Random;
 import java.util.Set;
@@ -81,16 +82,19 @@ public final class GameTrainer {
   private static final int POSITIONS_PER_GAME_CAP = 64;
   private static final int MAX_SELFPLAY_FILES = 64;
   private static final int MAX_EXAMPLES = 3_000_000;
-  private static final int RESULT_ONLY_EXAMPLES_PER_EVAL = 1;
+  private static final int EVALUATION_EXAMPLES_PER_RESULT_ONLY = 4;
+  private static final int MIN_SELFPLAY_EVALUATIONS = 8;
+  private static final int MIN_SELFPLAY_EVALUATION_DEPTH = 4;
+  private static final double MIN_SELFPLAY_EVALUATION_COVERAGE = 0.15;
   private static final double TEMPORAL_BASE_WEIGHT = 0.10;
   private static final double TEMPORAL_FUTURE_WEIGHT = 0.90;
   private static final double TEMPORAL_DECAY_PLIES = 36.0;
   private static final double EVAL_TARGET_SCALE_CP = 350.0;
   private static final double MAX_USABLE_EVAL_CP = 950.0;
-  private static final double RESULT_MIX = 0.15;
-  private static final double RESULT_ONLY_ROW_WEIGHT = 0.3;
+  private static final double RESULT_MIX = 0.05;
+  private static final double RESULT_ONLY_ROW_WEIGHT = 0.15;
   private static final double LABEL_SHRINKAGE_PRIOR = 0.05;
-  private static final double DRAW_EXAMPLE_WEIGHT = 0.75;
+  private static final double DRAW_EXAMPLE_WEIGHT = 0.20;
   private static final double DROPOUT_RATE = 0.10;
   private static final int MAX_CHUNKS = 16;
 
@@ -127,7 +131,13 @@ public final class GameTrainer {
 
     List<ReplayableGame> games = loadGames(pgnFiles);
     System.out.println(
-        "Parsed " + games.size() + " usable game(s) (" + malformedGames + " skipped).");
+        "Parsed "
+            + games.size()
+            + " usable game(s) ("
+            + malformedGames
+            + " malformed, "
+            + rejectedSelfPlayGames
+            + " low-quality self-play skipped).");
 
     if (games.size() < 8) {
       throw new IOException("Not enough usable games to train (need at least 8).");
@@ -181,10 +191,15 @@ public final class GameTrainer {
   }
 
   private int malformedGames;
+  private int rejectedSelfPlayGames;
   private boolean warmStarted;
 
   private record ReplayableGame(
-      List<String> sanMoves, double[] evalCp, int[] evalDepth, double whiteOutcome) {
+      List<String> sanMoves,
+      double[] evalCp,
+      int[] evalDepth,
+      double whiteOutcome,
+      boolean selfPlay) {
     double evalCpAt(int ply) {
       return evalCp != null && ply < evalCp.length ? evalCp[ply] : Double.NaN;
     }
@@ -195,7 +210,12 @@ public final class GameTrainer {
 
     boolean hasEvaluations() {
       if (evalCp == null) return false;
-      for (double v : evalCp) if (isUsableEvaluation(v)) return true;
+      for (int ply = 0; ply < evalCp.length; ply++) {
+        if (isUsableEvaluation(evalCp[ply])
+            && (!selfPlay || evalDepthAt(ply) >= MIN_SELFPLAY_EVALUATION_DEPTH)) {
+          return true;
+        }
+      }
       return false;
     }
   }
@@ -248,9 +268,11 @@ public final class GameTrainer {
 
   private List<ReplayableGame> loadGames(List<File> pgnFiles) throws IOException {
     malformedGames = 0;
+    rejectedSelfPlayGames = 0;
     List<ReplayableGame> games = new ArrayList<>();
 
     for (File file : pgnFiles) {
+      boolean selfPlay = isSelfPlayFile(file);
       String text = Files.readString(file.toPath(), StandardCharsets.UTF_8);
       for (PgnGame pgn : PgnGame.parseAll(text)) {
         Double outcome = whiteOutcomeOf(pgn.getResult());
@@ -258,11 +280,40 @@ public final class GameTrainer {
           malformedGames++;
           continue;
         }
+        if (selfPlay && !isHighQualitySelfPlay(pgn)) {
+          rejectedSelfPlayGames++;
+          continue;
+        }
         games.add(
-            new ReplayableGame(pgn.getSanMoves(), pgn.getEvalCp(), pgn.getEvalDepth(), outcome));
+            new ReplayableGame(
+                pgn.getSanMoves(), pgn.getEvalCp(), pgn.getEvalDepth(), outcome, selfPlay));
       }
     }
     return games;
+  }
+
+  static boolean isHighQualitySelfPlay(PgnGame game) {
+    String termination = game.getHeaders().getOrDefault("Termination", "").toLowerCase(Locale.ROOT);
+    if (termination.equals("ply limit") || termination.equals("no legal move")) return false;
+
+    Board board = new Board();
+    int evaluations = 0;
+    for (int ply = 0; ply < game.getSanMoves().size(); ply++) {
+      Move move = SanMoveParser.parse(board, game.getSanMoves().get(ply));
+      if (move == null) return false;
+
+      if (ply >= MIN_PLY
+          && game.getEvalDepth()[ply] >= MIN_SELFPLAY_EVALUATION_DEPTH
+          && isUsableEvaluation(game.getEvalCp()[ply])) {
+        evaluations++;
+      }
+      board.playMove(move);
+      if (board.getCurrentPositionRepetitionCount() >= 3) return false;
+    }
+
+    int eligiblePositions = game.getSanMoves().size() - MIN_PLY;
+    return evaluations >= MIN_SELFPLAY_EVALUATIONS
+        && evaluations >= eligiblePositions * MIN_SELFPLAY_EVALUATION_COVERAGE;
   }
 
   private static Double whiteOutcomeOf(String result) {
@@ -316,7 +367,9 @@ public final class GameTrainer {
 
           double evalCp = game.evalCpAt(ply);
           int evalDepth = game.evalDepthAt(ply);
-          boolean hasEval = isUsableEvaluation(evalCp);
+          boolean hasEval =
+              isUsableEvaluation(evalCp)
+                  && (!game.selfPlay() || evalDepth >= MIN_SELFPLAY_EVALUATION_DEPTH);
           if (!hasEval && !Double.isNaN(evalCp)) rejectedEvaluations++;
           double sideToMoveTarget =
               blendedSideToMoveTarget(
@@ -442,7 +495,7 @@ public final class GameTrainer {
     if (evalBacked.isEmpty()) return examples;
 
     int resultLimit =
-        Math.min(resultOnly.size(), evalBacked.size() * RESULT_ONLY_EXAMPLES_PER_EVAL);
+        Math.min(resultOnly.size(), evalBacked.size() / EVALUATION_EXAMPLES_PER_RESULT_ONLY);
     if (resultLimit == resultOnly.size()) return examples;
 
     List<SparseExample> balanced = new ArrayList<>(evalBacked.size() + resultLimit);
@@ -592,7 +645,7 @@ public final class GameTrainer {
         weightSum[slot] += weight;
         evalCounts[slot]++;
       } else if (evalCounts[slot] == 0) {
-        targetSum[slot] += target;
+        targetSum[slot] += target * weight;
         weightSum[slot] += weight;
       }
     }
@@ -648,8 +701,7 @@ public final class GameTrainer {
     }
 
     double targetAt(int slot) {
-      double count = evalCounts[slot] > 0 ? weightSum[slot] : counts[slot];
-      return targetSum[slot] / (count + LABEL_SHRINKAGE_PRIOR);
+      return targetSum[slot] / (weightSum[slot] + LABEL_SHRINKAGE_PRIOR);
     }
 
     float weightAt(int slot) {
@@ -691,6 +743,9 @@ public final class GameTrainer {
         source.size(), evalGames.size());
 
     List<SparseExample> built = buildExamples(source, extractor, "validation", false, null);
+    if (!evalGames.isEmpty()) {
+      built = built.stream().filter(SparseExample::hasEval).toList();
+    }
     built = subsampleEvenly(built, VALIDATION_MAX_EXAMPLES);
     Set<Long> keys = collectKeys(built);
     System.out.printf(

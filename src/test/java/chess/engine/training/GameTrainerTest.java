@@ -76,13 +76,44 @@ class GameTrainerTest {
   @Test
   void trainingBalancePreventsResultOnlyRowsFromDominating() {
     List<GameTrainer.SparseExample> examples = new ArrayList<>();
-    for (int i = 0; i < 2; i++) examples.add(example(true, i));
+    for (int i = 0; i < 4; i++) examples.add(example(true, i));
     for (int i = 0; i < 8; i++) examples.add(example(false, 100 + i));
 
     List<GameTrainer.SparseExample> balanced = GameTrainer.balanceTrainingExamples(examples);
 
-    assertEquals(4, balanced.size());
-    assertEquals(2, balanced.stream().filter(GameTrainer.SparseExample::hasEval).count());
+    assertEquals(5, balanced.size());
+    assertEquals(4, balanced.stream().filter(GameTrainer.SparseExample::hasEval).count());
+  }
+
+  @Test
+  void selfPlayRequiresDeepLabelsAndACompleteNonLoopingGame() {
+    PgnGame good = PgnGame.parseSingle(annotatedRuyLopez(" depth 4"));
+    PgnGame legacy = PgnGame.parseSingle(annotatedRuyLopez(""));
+    PgnGame looping =
+        PgnGame.parseSingle(
+            "[Event \"test\"]\n"
+                + "[Result \"1/2-1/2\"]\n"
+                + "[Termination \"threefold repetition\"]\n\n"
+                + "1. Nf3 { ev 0 depth 4 } Nf6 { ev 0 depth 4 } "
+                + "2. Ng1 { ev 0 depth 4 } Ng8 { ev 0 depth 4 } "
+                + "3. Nf3 { ev 0 depth 4 } Nf6 { ev 0 depth 4 } "
+                + "4. Ng1 { ev 0 depth 4 } Ng8 { ev 0 depth 4 } 1/2-1/2");
+
+    assertTrue(GameTrainer.isHighQualitySelfPlay(good));
+    assertFalse(GameTrainer.isHighQualitySelfPlay(legacy));
+    assertFalse(GameTrainer.isHighQualitySelfPlay(looping));
+  }
+
+  @Test
+  void resultOnlyDuplicatesUseTheirConfidenceWhenMerged() {
+    GameTrainer.PositionTable table = new GameTrainer.PositionTable(1);
+    int[] indices = {0};
+    float[] values = {1.0f};
+
+    table.add(123L, indices, values, 1.0, 0.1, false);
+    table.add(123L, indices, values, -1.0, 0.9, false);
+
+    assertEquals(-0.8 / 1.05, table.targetAt(occupiedSlot(table)), 1.0e-12);
   }
 
   @Test
@@ -144,5 +175,44 @@ class GameTrainerTest {
   private static GameTrainer.SparseExample example(boolean hasEval, long key) {
     return new GameTrainer.SparseExample(
         new int[] {0}, new float[] {1.0f}, 0.25, 1.0f, key, hasEval);
+  }
+
+  private static String annotatedRuyLopez(String depth) {
+    return "[Event \"test\"]\n"
+        + "[Result \"1-0\"]\n"
+        + "[Termination \"evaluation adjudication\"]\n\n"
+        + "1. e4 { ev 10"
+        + depth
+        + " } e5 { ev -10"
+        + depth
+        + " } 2. Nf3 { ev 12"
+        + depth
+        + " } Nc6 { ev -12"
+        + depth
+        + " } 3. Bb5 { ev 14"
+        + depth
+        + " } a6 { ev -14"
+        + depth
+        + " } 4. Ba4 { ev 16"
+        + depth
+        + " } Nf6 { ev -16"
+        + depth
+        + " } 5. O-O { ev 18"
+        + depth
+        + " } Be7 { ev -18"
+        + depth
+        + " } 6. Re1 { ev 20"
+        + depth
+        + " } b5 { ev -20"
+        + depth
+        + " } 7. Bb3 { ev 22"
+        + depth
+        + " } d6 { ev -22"
+        + depth
+        + " } 8. c3 { ev 24"
+        + depth
+        + " } O-O { ev -24"
+        + depth
+        + " } 1-0";
   }
 }

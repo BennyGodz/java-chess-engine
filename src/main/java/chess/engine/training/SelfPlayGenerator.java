@@ -27,7 +27,7 @@ public final class SelfPlayGenerator {
   static final long DEFAULT_TIME_PER_MOVE_MS = 400;
 
   private static final int SEARCH_DEPTH = 12;
-  private static final int MIN_LABEL_DEPTH = 3;
+  private static final int MIN_LABEL_DEPTH = 4;
   private static final int MAX_PLIES = 240;
   private static final int MIN_OPENING_PLIES = 4;
   private static final int MAX_OPENING_PLIES = 12;
@@ -94,6 +94,7 @@ public final class SelfPlayGenerator {
     AtomicInteger wins = new AtomicInteger();
     AtomicInteger draws = new AtomicInteger();
     AtomicInteger losses = new AtomicInteger();
+    AtomicInteger discarded = new AtomicInteger();
 
     OpeningBook openingBook = new OpeningBook();
     List<List<String>> lines = new ArrayList<>(openingBook.getOpenings());
@@ -124,6 +125,11 @@ public final class SelfPlayGenerator {
       for (Future<String> future : futures) {
         try {
           String pgn = future.get();
+          PgnGame game = PgnGame.parseSingle(pgn);
+          if (game == null || !GameTrainer.isHighQualitySelfPlay(game)) {
+            discarded.incrementAndGet();
+            continue;
+          }
           out.print(pgn);
           switch (resultOf(pgn)) {
             case "1-0" -> wins.incrementAndGet();
@@ -140,8 +146,14 @@ public final class SelfPlayGenerator {
 
     long elapsedSec = (System.nanoTime() - startNanos) / 1_000_000_000;
     System.out.printf(
-        "Self-play done in %ds. White wins %d | draws %d | Black wins %d%n",
-        elapsedSec, wins.get(), draws.get(), losses.get());
+        "Self-play done in %ds. Kept %d | discarded %d | White wins %d | draws %d | Black wins"
+            + " %d%n",
+        elapsedSec,
+        wins.get() + draws.get() + losses.get(),
+        discarded.get(),
+        wins.get(),
+        draws.get(),
+        losses.get());
     return List.of(outputFile);
   }
 
@@ -165,7 +177,22 @@ public final class SelfPlayGenerator {
         termination = "checkmate";
         break;
       }
-      if (board.isStalemate(whiteToMove) || board.isAutomaticDraw()) {
+      if (board.isStalemate(whiteToMove)) {
+        result = "1/2-1/2";
+        termination = "stalemate";
+        break;
+      }
+      if (board.isThreefoldRepetition()) {
+        result = "1/2-1/2";
+        termination = "threefold repetition";
+        break;
+      }
+      if (board.isFiftyMoveRule()) {
+        result = "1/2-1/2";
+        termination = "fifty-move rule";
+        break;
+      }
+      if (board.isAutomaticDraw()) {
         result = "1/2-1/2";
         termination = "automatic draw";
         break;

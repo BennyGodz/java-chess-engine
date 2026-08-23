@@ -119,7 +119,7 @@ missing weights do not cause random move scores.
 Training is game-based. `GameTrainer` reads PGNs already under `games/`; it does not generate or
 download games. The trainer replays each game and turns its positions into NNUE inputs. Duplicate
 positions are removed, positions are also mirrored with the colors swapped, and the data is split
-into fixed training and validation sets.
+deterministically into training and validation sets.
 
 Self-play PGNs attach a search score to each searched move:
 
@@ -129,10 +129,12 @@ Self-play PGNs attach a search score to each searched move:
 
 Each training target combines the engine's search score with the game result. Positions closer to
 the end of a game use more of the final result. PGNs without search scores are still used, but with
-less weight. Scores from deeper searches count more, old invalid timeout scores are ignored, and
-games without search scores are limited so they cannot outweigh the better data. The trainer uses
-all non-self-play PGNs and the newest 64 self-play batches, so old scores from weaker networks do
-not outweigh newer training data.
+less weight. Self-play scores are used only when search completed depth 4 or deeper. Invalid,
+looping, truncated, and sparsely labeled self-play games are rejected. Result-only positions are
+limited to one for every four evaluated positions and draws receive very little weight. Validation
+uses evaluated positions when they are available, so noisy game results cannot select the best
+checkpoint. The trainer uses all non-self-play PGNs and the newest 64 self-play batches, so old
+scores from weaker networks do not outweigh newer training data.
 
 The trainer uses AdamW, limits unusually large updates, uses dropout, lowers the learning rate when
 progress stalls, and stops early when validation stops improving. Training writes:
@@ -151,12 +153,14 @@ java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator [games]
 Defaults are 256 games, 400 ms per searched move, and half the available CPU threads. Output is
 written to `games/selfplay/`. Opening moves come from the built-in book; every later move is chosen
 by search, not randomly. Opening lines are shuffled and used evenly. The number of opening-book
-moves changes between games to create different positions without adding random moves.
+moves changes between games to create different positions without adding random moves. Games that
+repeat three times, hit a move limit, contain an invalid move, or lack enough depth-4 labels are
+discarded instead of being written. Self-play also stops at claimable threefold and 50-move draws.
 
 Example:
 
 ```bash
-java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator 512 300 8
+java -cp build/classes/java/main chess.engine.training.SelfPlayGenerator 512 800 8
 ```
 
 ### Download Lichess PGNs
@@ -188,15 +192,16 @@ java -cp build/classes/java/main chess.engine.training.TrainingPipeline \
 Current defaults are 12 hours, 256 games in the first iteration, 400 ms per searched move, half the
 available CPU threads, and at most 16 epochs per training stage. Each round generates new self-play
 games using the current best network, trains the NNUE, keeps a new network only when validation
-improves, and repeats until time runs out. The number of games grows by 20% each round up to four
-times the starting count. Move time grows by 10% up to three times the starting time. The pipeline
-does not start another larger round when the previous round would not fit in the time left. At least
-100 games are required for each round.
+improves, and repeats until time runs out. The game count is the number attempted; only games that
+pass the quality checks are retained. The number of games grows by 20% each round up to four times
+the starting count. Move time grows by 10% up to three times the starting time. The pipeline does
+not start another larger round when the previous round would not fit in the time left. At least 100
+games are required for each round.
 
 Example:
 
 ```bash
-java -cp build/classes/java/main chess.engine.training.TrainingPipeline 8 512 300 8 16
+java -cp build/classes/java/main chess.engine.training.TrainingPipeline 8 512 800 8 16
 ```
 
 Training can improve the evaluator, but no Elo level is guaranteed. Strength depends on search
