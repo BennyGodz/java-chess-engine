@@ -22,14 +22,19 @@ public class SearchEngine {
   public static final int MATE_SCORE = 100_000;
 
   private static final int INFINITY = 1_000_000;
+  private static final int MATE_THRESHOLD = MATE_SCORE - 1_000;
   private static final int MAX_CHECK_EXTENSIONS = 4;
   private static final int MAX_QUIESCENCE_DEPTH = 16;
+  private static final int HARD_QUIESCENCE_DEPTH = 24;
   private static final int PROMOTION_EXTENSION = 1;
   private static final int ROOT_REPETITION_PENALTY = 30;
 
   private final Evaluator evaluator;
   private long nodes;
   private long deadlineNanos;
+  private boolean ignoreTimeout;
+  private int searchGeneration;
+  private long lastRootContext = Long.MIN_VALUE;
 
   private static final int TT_SIZE = 1 << 21;
   private static final int TT_MASK = TT_SIZE - 1;
@@ -51,13 +56,19 @@ public class SearchEngine {
     int score;
     TTFlag flag;
     Move bestMove;
+    int generation;
 
-    TTEntry(long key, int depth, int score, TTFlag flag, Move bestMove) {
+    TTEntry(long key, int depth, int score, TTFlag flag, Move bestMove, int generation) {
+      update(key, depth, score, flag, bestMove, generation);
+    }
+
+    void update(long key, int depth, int score, TTFlag flag, Move bestMove, int generation) {
       this.key = key;
       this.depth = depth;
       this.score = score;
       this.flag = flag;
       this.bestMove = bestMove;
+      this.generation = generation;
     }
   }
 
@@ -76,8 +87,8 @@ public class SearchEngine {
 
   /**
    * Finds the best move for the side to move using iterative deepening up to maxDepth. A complete,
-   * deterministic static pass supplies the fallback, so even a very short timeout returns a real
-   * score and a reasoned move instead of the first legal move and an uninitialized score.
+   * deterministic tactical pass supplies the fallback, so even a very short timeout resolves all
+   * immediate captures instead of hanging a rook or queen because the clock expired.
    */
   public SearchResult findBestMove(Board board, int maxDepth, long timeLimitMillis) {
     List<Move> legalMoves = board.getLegalMoves(board.isWhiteToMove());
@@ -88,11 +99,6 @@ public class SearchEngine {
     }
 
     nodes = 0;
-    RootResult fallback = chooseStaticFallback(board, legalMoves);
-    Move bestMove = fallback.move();
-    int bestScore = fallback.score();
-    int completedDepth = 0;
-
     long budgetMillis = Math.max(1L, timeLimitMillis);
     long budgetNanos =
         budgetMillis > Long.MAX_VALUE / 1_000_000L ? Long.MAX_VALUE : budgetMillis * 1_000_000L;
@@ -100,7 +106,18 @@ public class SearchEngine {
     deadlineNanos =
         startNanos > Long.MAX_VALUE - budgetNanos ? Long.MAX_VALUE : startNanos + budgetNanos;
 
-    for (int depth = 1; depth <= maxDepth; depth++) {
+    prepareSearchGeneration(board);
+
+    ignoreTimeout = true;
+    RootResult fallback = searchRoot(board, 1, null);
+    ignoreTimeout = false;
+
+    Move bestMove = fallback.move();
+    int bestScore = fallback.score();
+    int completedDepth = 1;
+
+    for (int depth = 2; depth <= Math.max(1, maxDepth); depth++) {
+      if (System.nanoTime() >= deadlineNanos) break;
       try {
         RootResult result = searchRoot(board, depth, bestMove);
         bestMove = result.move();
@@ -114,26 +131,15 @@ public class SearchEngine {
     return new SearchResult(bestMove, bestScore, completedDepth, nodes);
   }
 
-  private RootResult chooseStaticFallback(Board board, List<Move> moves) {
-    boolean white = board.isWhiteToMove();
-    Move bestMove = moves.get(0);
-    int bestScore = -INFINITY;
-
-    for (Move move : moves) {
-      Board child = board.copyAndPlayMoveForSearch(move);
-      if (child.isCheckmate(child.isWhiteToMove())) {
-        return new RootResult(move, MATE_SCORE);
-      }
-
-      int score =
-          (white ? evaluator.evaluate(child) : -evaluator.evaluate(child))
-              - repetitionPenalty(child);
-      if (score > bestScore) {
-        bestMove = move;
-        bestScore = score;
-      }
+  private void prepareSearchGeneration(Board board) {
+    long rootContext =
+        transpositionKey(board)
+            ^ Long.rotateLeft(board.getCurrentPositionRepetitionCount() * 0x9E3779B97F4A7C15L, 17);
+    if (rootContext != lastRootContext) {
+      searchGeneration++;
+      if (searchGeneration == 0) searchGeneration = 1;
+      lastRootContext = rootContext;
     }
-    return new RootResult(bestMove, bestScore);
   }
 
   /**
@@ -160,7 +166,8 @@ public class SearchEngine {
       Board child = board.copyAndPlayMoveForSearch(move);
       boolean givesCheck = child.isInCheck(child.isWhiteToMove());
 
-      int extension = (givesCheck ? 1 : 0) + (move.isPromotion() ? PROMOTION_EXTENSION : 0);
+      int extension =
+          depth > 1 ? (givesCheck ? 1 : 0) + (move.isPromotion() ? PROMOTION_EXTENSION : 0) : 0;
       int childDepth = Math.max(0, depth - 1 + extension);
 
       int score;
@@ -222,11 +229,13 @@ public class SearchEngine {
     long positionKey = transpositionKey(board);
     int ttIndex = (int) (positionKey ^ (positionKey >>> 32)) & TT_MASK;
     TTEntry ttEntry = useTranspositionTable ? tt[ttIndex] : null;
+    if (ttEntry != null && ttEntry.generation != searchGeneration) ttEntry = null;
 
     if (ttEntry != null && ttEntry.key == positionKey && ttEntry.depth >= depth) {
-      if (ttEntry.flag == TTFlag.EXACT) return ttEntry.score;
-      if (ttEntry.flag == TTFlag.ALPHA && ttEntry.score <= alpha) return alpha;
-      if (ttEntry.flag == TTFlag.BETA && ttEntry.score >= beta) return beta;
+      int tableScore = scoreFromTable(ttEntry.score, ply);
+      if (ttEntry.flag == TTFlag.EXACT) return tableScore;
+      if (ttEntry.flag == TTFlag.ALPHA && tableScore <= alpha) return alpha;
+      if (ttEntry.flag == TTFlag.BETA && tableScore >= beta) return beta;
     }
 
     /*
@@ -236,8 +245,7 @@ public class SearchEngine {
      * reply can wildly overstate the score.
      */
     if (allowNull && !board.isInCheck(side) && depth >= 3 && hasNonPawnMaterial(board, side)) {
-      Board nullBoard = new Board(board);
-      nullBoard.makeNullMove();
+      Board nullBoard = board.copyAndMakeNullMoveForSearch();
       int nullScore = -negamax(nullBoard, depth - 3, -beta, -beta + 1, ply + 1, 0, false);
       if (nullScore >= beta) return beta;
     }
@@ -245,7 +253,7 @@ public class SearchEngine {
     Move ttMove = ttEntry != null && ttEntry.key == positionKey ? ttEntry.bestMove : null;
     orderMoves(board, moves, ttMove, ply);
 
-    if (++nodes % HISTORY_RESET_NODES == 0) decayHistory();
+    if (nodes % HISTORY_RESET_NODES == 0) decayHistory();
 
     int bestScore = -INFINITY;
     Move bestMove = null;
@@ -303,7 +311,18 @@ public class SearchEngine {
     if (bestScore <= originalAlpha) flag = TTFlag.ALPHA;
     else if (bestScore >= beta) flag = TTFlag.BETA;
     if (useTranspositionTable) {
-      tt[ttIndex] = new TTEntry(positionKey, depth, bestScore, flag, bestMove);
+      int tableScore = scoreToTable(bestScore, ply);
+      TTEntry stored = tt[ttIndex];
+      boolean replace =
+          stored == null
+              || stored.generation != searchGeneration
+              || stored.key == positionKey
+              || depth + 2 >= stored.depth;
+      if (stored == null) {
+        tt[ttIndex] = new TTEntry(positionKey, depth, tableScore, flag, bestMove, searchGeneration);
+      } else if (replace) {
+        stored.update(positionKey, depth, tableScore, flag, bestMove, searchGeneration);
+      }
     }
 
     return bestScore;
@@ -331,8 +350,11 @@ public class SearchEngine {
       if (standPat >= beta) return beta;
       if (standPat > alpha) alpha = standPat;
     }
-    if (quiescenceDepth >= MAX_QUIESCENCE_DEPTH) {
-      return inCheck ? (side ? evaluator.evaluate(board) : -evaluator.evaluate(board)) : alpha;
+    if (quiescenceDepth >= HARD_QUIESCENCE_DEPTH) {
+      return side ? evaluator.evaluate(board) : -evaluator.evaluate(board);
+    }
+    if (!inCheck && quiescenceDepth >= MAX_QUIESCENCE_DEPTH) {
+      return alpha;
     }
 
     List<Move> movesToSearch = legalMoves;
@@ -400,7 +422,19 @@ public class SearchEngine {
   }
 
   private boolean isCapture(Board board, Move move) {
-    return board.getPiece(move.getEnd()) != null;
+    return move.isEnPassant() || board.getPiece(move.getEnd()) != null;
+  }
+
+  private static int scoreToTable(int score, int ply) {
+    if (score > MATE_THRESHOLD) return score + ply;
+    if (score < -MATE_THRESHOLD) return score - ply;
+    return score;
+  }
+
+  private static int scoreFromTable(int score, int ply) {
+    if (score > MATE_THRESHOLD) return score - ply;
+    if (score < -MATE_THRESHOLD) return score + ply;
+    return score;
   }
 
   private void orderMoves(Board board, List<Move> moves, Move ttMove, int ply) {
@@ -456,10 +490,12 @@ public class SearchEngine {
   }
 
   private void checkTime() {
-    if (System.nanoTime() >= deadlineNanos) throw new SearchTimeoutException();
+    if (!ignoreTimeout && System.nanoTime() >= deadlineNanos) throw new SearchTimeoutException();
   }
 
-  private static class SearchTimeoutException extends RuntimeException {}
+  private static class SearchTimeoutException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
+  }
 
   private record RootResult(Move move, int score) {}
 

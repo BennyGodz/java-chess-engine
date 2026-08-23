@@ -1,6 +1,7 @@
 package chess.board;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import org.junit.jupiter.api.Test;
 
@@ -30,12 +31,34 @@ class BoardTest {
     assertEquals(8_902, countPositions(new Board(), 3));
   }
 
+  @Test
+  void zobristHashDistinguishesPieceColours() {
+    Board whiteQueen = new Board();
+    whiteQueen.loadFEN("7k/8/8/8/8/8/6K1/Q7 w - - 0 1");
+    Board blackQueen = new Board();
+    blackQueen.loadFEN("7K/8/8/8/8/8/6k1/q7 w - - 0 1");
+
+    assertNotEquals(whiteQueen.getZobristKey(), blackQueen.getZobristKey());
+  }
+
+  @Test
+  void nullMoveDoesNotChangeRealGameClocksOrCreateRepetition() {
+    Board board = new Board();
+    int halfmoveClock = board.getHalfmoveClock();
+    int fullmoveNumber = board.getFullmoveNumber();
+
+    board.makeNullMove();
+
+    assertEquals(halfmoveClock, board.getHalfmoveClock());
+    assertEquals(fullmoveNumber, board.getFullmoveNumber());
+    assertEquals(0, board.getCurrentPositionRepetitionCount());
+  }
+
   private static long countPositions(Board board, int depth) {
     if (depth == 0) return 1;
     long positions = 0;
     for (Move move : board.getLegalMoves(board.isWhiteToMove())) {
-      Board child = new Board(board);
-      child.playMove(move);
+      Board child = board.copyAndPlayMoveForSearch(move);
       positions += countPositions(child, depth - 1);
     }
     return positions;

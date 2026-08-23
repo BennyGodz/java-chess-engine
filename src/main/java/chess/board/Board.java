@@ -47,7 +47,7 @@ public class Board {
   /** Zobrist hash of the current position. */
   private long zobristKey;
 
-  // Random but fixed Zobrist keys, one per piece type/square, castling right set and en passant
+  // Random but fixed Zobrist keys, one per coloured piece/square, castling right set and en passant
   // square.
   private static final long[][] PIECE_KEYS;
   private static final long[] CASTLING_KEYS;
@@ -56,10 +56,10 @@ public class Board {
 
   static {
     java.util.Random rand = new java.util.Random(0);
-    PIECE_KEYS = new long[6][64];
+    PIECE_KEYS = new long[12][64];
     CASTLING_KEYS = new long[16];
     EN_PASSANT_KEYS = new long[64];
-    for (int p = 0; p < 6; p++) {
+    for (int p = 0; p < 12; p++) {
       for (int s = 0; s < 64; s++) {
         PIECE_KEYS[p][s] = rand.nextLong();
       }
@@ -106,15 +106,18 @@ public class Board {
   }
 
   /**
-   * Maps a piece to its Zobrist table index: Pawn=0, Knight=1, Bishop=2, Rook=3, Queen=4, King=5.
+   * Maps a piece to its Zobrist table index. White occupies 0..5 and Black occupies 6..11, so
+   * otherwise identical positions with colours swapped can never share a transposition key.
    */
   private static int pieceTypeIndex(Piece piece) {
-    if (piece instanceof Pawn) return 0;
-    if (piece instanceof Knight) return 1;
-    if (piece instanceof Bishop) return 2;
-    if (piece instanceof Rook) return 3;
-    if (piece instanceof Queen) return 4;
-    return 5;
+    int type;
+    if (piece instanceof Pawn) type = 0;
+    else if (piece instanceof Knight) type = 1;
+    else if (piece instanceof Bishop) type = 2;
+    else if (piece instanceof Rook) type = 3;
+    else if (piece instanceof Queen) type = 4;
+    else type = 5;
+    return type + (piece.isWhite() ? 0 : 6);
   }
 
   /**
@@ -122,6 +125,11 @@ public class Board {
    * copied so state queries on the copy stay consistent.
    */
   public Board(Board other) {
+    this(other, true);
+  }
+
+  /** Internal lightweight copy used when repetition history is irrelevant. */
+  private Board(Board other, boolean copyHistory) {
     board = new Piece[8][8];
 
     for (int row = 0; row < 8; row++) {
@@ -139,7 +147,7 @@ public class Board {
     enPassantTarget = other.enPassantTarget;
     halfmoveClock = other.halfmoveClock;
     fullmoveNumber = other.fullmoveNumber;
-    repetitionCounts.putAll(other.repetitionCounts);
+    if (copyHistory) repetitionCounts.putAll(other.repetitionCounts);
     zobristKey = other.zobristKey;
   }
 
@@ -541,6 +549,20 @@ public class Board {
     return copy;
   }
 
+  /** Creates a lightweight position copy for testing whether a move exposes its own king. */
+  public Board copyAndMakeMoveForValidation(Move move) {
+    Board copy = new Board(this, false);
+    copy.makeMove(move);
+    return copy;
+  }
+
+  /** Creates the history-free synthetic position used for null-move pruning. */
+  public Board copyAndMakeNullMoveForSearch() {
+    Board copy = new Board(this, false);
+    copy.makeNullMove();
+    return copy;
+  }
+
   /** Removes the castling right of a rook that has been captured on its home square. */
   private void removeCastlingRightForRookCapture(Position square, boolean rookWhite) {
     if (rookWhite) {
@@ -804,15 +826,13 @@ public class Board {
   }
 
   /**
-   * Plays a "null move": only the side to move flips. Used by the search engine for null-move
-   * pruning; never a real chess move.
+   * Plays a synthetic null move for pruning. It flips the side and clears en passant, but it does
+   * not alter real-game clocks or repetition history because no such move occurred in the game.
    */
   public void makeNullMove() {
-    if (!whiteToMove) fullmoveNumber++;
     whiteToMove = !whiteToMove;
     enPassantTarget = null;
-    halfmoveClock++;
-    repetitionCounts.merge(getPositionKey(), 1, Integer::sum);
+    repetitionCounts.clear();
     this.zobristKey = initZobristKey();
   }
 
