@@ -44,14 +44,6 @@ public class Board {
 
     /** Deep copy used for move simulation. History is copied so state queries remain consistent. */
     public Board(Board other) {
-        this(other, true);
-    }
-
-    /**
-     * Internal copy constructor. Search and legality probes do not need to duplicate the complete
-     * game-history map; the search engine tracks repetitions along its current variation instead.
-     */
-    private Board(Board other, boolean copyHistory) {
         board = new Piece[8][8];
 
         for (int row = 0; row < 8; row++) {
@@ -76,9 +68,7 @@ public class Board {
 
         halfmoveClock = other.halfmoveClock;
         fullmoveNumber = other.fullmoveNumber;
-        if (copyHistory) {
-            repetitionCounts.putAll(other.repetitionCounts);
-        }
+        repetitionCounts.putAll(other.repetitionCounts);
     }
 
     private Piece copyPiece(Piece piece) {
@@ -454,34 +444,9 @@ public class Board {
      * Used by the search engine so the current Board itself is never mutated.
      */
     public Board copyAndPlayMoveForSearch(Move move) {
-        Board copy = new Board(this, false);
-        copy.playMoveWithoutRecordingHistory(move);
+        Board copy = new Board(this);
+        copy.playMove(move);
         return copy;
-    }
-
-    /**
-     * Lightweight copy used only to test whether a pseudo-legal move leaves its king in check.
-     */
-    public Board copyAndMakeMoveForValidation(Move move) {
-        Board copy = new Board(this, false);
-        copy.makeMove(move);
-        return copy;
-    }
-
-    private void playMoveWithoutRecordingHistory(Move move) {
-        Piece movingPiece = getPiece(move.getStart());
-        if (movingPiece == null || movingPiece.isWhite() != whiteToMove) {
-            throw new IllegalArgumentException("That piece cannot move now.");
-        }
-
-        boolean capture = isCapture(move, movingPiece);
-        makeMove(move);
-
-        if (movingPiece instanceof Pawn || capture) halfmoveClock = 0;
-        else halfmoveClock++;
-
-        if (!whiteToMove) fullmoveNumber++;
-        whiteToMove = !whiteToMove;
     }
 
     private void removeCastlingRightForRookCapture(Position square, boolean rookWhite) {
@@ -714,46 +679,6 @@ public class Board {
         Position legalEp = getRepetitionEnPassantTarget();
         key.append(legalEp == null ? "-" : legalEp.toAlgebraic());
         return key.toString();
-    }
-
-    /** A defensive copy of the real-game history used to seed a new search. */
-    public Map<String, Integer> getRepetitionCountsSnapshot() {
-        return new HashMap<>(repetitionCounts);
-    }
-
-    /**
-     * Fast deterministic key for the transposition table. The half-move clock is included because
-     * it can change whether a position is drawn even when all pieces occupy the same squares.
-     */
-    public long getSearchKey() {
-        long key = 0xcbf29ce484222325L;
-
-        for (int row = 0; row < 8; row++) {
-            for (int column = 0; column < 8; column++) {
-                Piece piece = board[row][column];
-                if (piece == null) continue;
-
-                long value = ((long) piece.getSymbol() << 8) | (row * 8L + column);
-                key ^= value;
-                key *= 0x100000001b3L;
-            }
-        }
-
-        key ^= whiteToMove ? 0x9e3779b97f4a7c15L : 0xc2b2ae3d27d4eb4fL;
-
-        int castlingMask = 0;
-        if (whiteKingsideCastle) castlingMask |= 1;
-        if (whiteQueensideCastle) castlingMask |= 2;
-        if (blackKingsideCastle) castlingMask |= 4;
-        if (blackQueensideCastle) castlingMask |= 8;
-        key ^= 0x94d049bb133111ebL * (castlingMask + 1L);
-
-        if (enPassantTarget != null) {
-            key ^= 0x2545f4914f6cdd1dL * (enPassantTarget.getColumn() + 1L);
-        }
-
-        key ^= 0x165667b19e3779f9L * (Math.min(halfmoveClock, 150) + 1L);
-        return key;
     }
 
     private Position getRepetitionEnPassantTarget() {

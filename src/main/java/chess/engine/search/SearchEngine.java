@@ -2,54 +2,55 @@ package chess.engine.search;
 
 import chess.board.Board;
 import chess.board.Move;
-import chess.board.Position;
 import chess.engine.evaluation.Evaluator;
 import chess.pieces.Piece;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Iterative-deepening negamax search with alpha-beta pruning, a transposition table,
- * principal-variation search, quiescence search, check extensions, and tactical move ordering.
+ * Chess search engine using:
+ *
+ * Iterative deepening
+ * Negamax
+ * Alpha beta pruning
+ * Quiescence search
+ * Tactical move ordering
+ * Check extensions
+ *
+ * The evaluator handles positional decisions.
+ *
+ * This class focuses primarily on calculating tactics,
+ * forcing sequences, checks, captures, and mating attacks.
  */
 public class SearchEngine {
 
     public static final int MATE_SCORE = 100_000;
 
     private static final int INFINITY = 1_000_000;
-    private static final int MATE_THRESHOLD = MATE_SCORE - 1_000;
-    private static final int MAX_CHECK_EXTENSIONS = 4;
-    private static final int MAX_QUIESCENCE_DEPTH = 12;
-    private static final int HARD_QUIESCENCE_DEPTH = 24;
-    private static final int MAX_PLY = 128;
 
-    private static final int TT_SIZE = 1 << 18;
-    private static final int TT_MASK = TT_SIZE - 1;
-    private static final byte TT_EXACT = 0;
-    private static final byte TT_LOWER = 1;
-    private static final byte TT_UPPER = 2;
+    /*
+     * Maximum number of check extensions allowed
+     * in one variation.
+     */
+    private static final int MAX_CHECK_EXTENSIONS = 8;
+
+    /*
+     * Maximum depth of quiescence search.
+     *
+     * This is necessary because checks and captures can
+     * create very long tactical sequences.
+     *
+     * Without a limit, quiescence can recurse forever
+     * and eventually cause StackOverflowError.
+     */
+    private static final int MAX_QUIESCENCE_DEPTH = 8;
 
     private final Evaluator evaluator;
 
-    private final long[] ttKeys = new long[TT_SIZE];
-    private final int[] ttDepths = new int[TT_SIZE];
-    private final int[] ttScores = new int[TT_SIZE];
-    private final byte[] ttFlags = new byte[TT_SIZE];
-    private final Move[] ttMoves = new Move[TT_SIZE];
-    private final int[] ttGenerations = new int[TT_SIZE];
-
-    private final Move[][] killerMoves = new Move[MAX_PLY][2];
-    private final int[][][] history = new int[2][64][64];
-
-    private Map<String, Integer> repetitionCounts = new HashMap<>();
     private long nodes;
     private long deadlineNanos;
-    private boolean ignoreTimeout;
-    private int searchGeneration;
 
     public SearchEngine() {
         this(new Evaluator());
@@ -57,482 +58,793 @@ public class SearchEngine {
 
     public SearchEngine(Evaluator evaluator) {
         this.evaluator = evaluator;
-        Arrays.fill(ttDepths, -1);
     }
 
     /**
-     * Finds the best move under a soft time limit. Depth one is always completed so an expired
-     * clock or a cold JVM can never make the engine return an arbitrary, tactically losing move.
+     * Find the best move using iterative deepening.
      */
-    public SearchResult findBestMove(Board board, int maxDepth, long timeLimitMillis) {
-        List<Move> legalMoves = board.getLegalMoves(board.isWhiteToMove());
+    public SearchResult findBestMove(
+            Board board,
+            int maxDepth,
+            long timeLimitMillis
+    ) {
+
+        List<Move> legalMoves =
+                board.getLegalMoves(
+                        board.isWhiteToMove()
+                );
+
         if (legalMoves.isEmpty()) {
-            return new SearchResult(null, 0, 0, 0);
+
+            return new SearchResult(
+                    null,
+                    0,
+                    0,
+                    0
+            );
         }
 
-        resetSearchState(board);
-        long budgetMillis = Math.max(1, timeLimitMillis);
-        long now = System.nanoTime();
-        long budgetNanos = budgetMillis > Long.MAX_VALUE / 1_000_000L
-                ? Long.MAX_VALUE
-                : budgetMillis * 1_000_000L;
-        deadlineNanos = budgetNanos == Long.MAX_VALUE || now > Long.MAX_VALUE - budgetNanos
-                ? Long.MAX_VALUE
-                : now + budgetNanos;
+        nodes = 0;
+
+        deadlineNanos =
+                System.nanoTime()
+                        + Math.max(
+                        1,
+                        timeLimitMillis
+                ) * 1_000_000L;
+
+        Move bestMove =
+                legalMoves.get(0);
+
+        int bestScore =
+                -INFINITY;
+
+        int completedDepth = 0;
 
         /*
-         * This untimed safety pass is deliberately mandatory. Its quiescence search follows all
-         * captures and check evasions, so directly hanging a rook or queen cannot be the fallback.
+         * Iterative deepening.
+         *
+         * If time expires during a deeper search,
+         * the result from the previous completed depth
+         * is kept.
          */
-        ignoreTimeout = true;
-        RootResult completed = searchRoot(board, 1, null);
-        ignoreTimeout = false;
-
-        Move bestMove = completed.move;
-        int bestScore = completed.score;
-        int completedDepth = 1;
-
-        for (int depth = 2; depth <= Math.max(1, maxDepth); depth++) {
-            if (System.nanoTime() >= deadlineNanos) break;
+        for (
+                int depth = 1;
+                depth <= maxDepth;
+                depth++
+        ) {
 
             try {
-                RootResult result = searchRoot(board, depth, bestMove);
-                bestMove = result.move;
-                bestScore = result.score;
-                completedDepth = depth;
-            } catch (SearchTimeoutException ignored) {
+
+                RootResult result =
+                        searchRoot(
+                                board,
+                                depth,
+                                bestMove
+                        );
+
+                bestMove =
+                        result.move;
+
+                bestScore =
+                        result.score;
+
+                completedDepth =
+                        depth;
+
+            } catch (
+                    SearchTimeoutException e
+            ) {
+
                 break;
             }
         }
 
-        return new SearchResult(bestMove, bestScore, completedDepth, nodes);
+        return new SearchResult(
+                bestMove,
+                bestScore,
+                completedDepth,
+                nodes
+        );
     }
 
-    private void resetSearchState(Board board) {
-        nodes = 0;
-        repetitionCounts = new HashMap<>(board.getRepetitionCountsSnapshot());
-        searchGeneration++;
-        if (searchGeneration == 0) {
-            Arrays.fill(ttGenerations, 0);
-            searchGeneration = 1;
-        }
+    /**
+     * Root search.
+     */
+    private RootResult searchRoot(
+            Board board,
+            int depth,
+            Move previousBest
+    ) {
 
-        for (Move[] killers : killerMoves) {
-            Arrays.fill(killers, null);
-        }
-        for (int[][] sideHistory : history) {
-            for (int[] fromHistory : sideHistory) {
-                Arrays.fill(fromHistory, 0);
-            }
-        }
-    }
-
-    private RootResult searchRoot(Board board, int depth, Move previousBest) {
         checkTime();
 
-        List<Move> moves = board.getLegalMoves(board.isWhiteToMove());
-        if (moves.isEmpty()) return new RootResult(null, 0);
+        List<Move> moves =
+                board.getLegalMoves(
+                        board.isWhiteToMove()
+                );
 
-        long rootKey = board.getSearchKey();
-        int ttIndex = tableIndex(rootKey);
-        Move tableMove = ttGenerations[ttIndex] == searchGeneration
-                && ttKeys[ttIndex] == rootKey
-                ? ttMoves[ttIndex]
-                : null;
-        Move orderingMove = previousBest != null ? previousBest : tableMove;
-        orderMoves(board, moves, orderingMove, 0);
+        if (moves.isEmpty()) {
 
-        Move bestMove = moves.get(0);
-        int bestScore = -INFINITY;
-        int alpha = -INFINITY;
-        int beta = INFINITY;
-        boolean firstMove = true;
-
-        for (Move move : moves) {
-            checkTime();
-
-            Board child = board.copyAndPlayMoveForSearch(move);
-            String childPositionKey = pushPosition(child);
-            boolean givesCheck = child.isInCheck(child.isWhiteToMove());
-            int extension = depth > 1 && givesCheck ? 1 : 0;
-            int childDepth = depth - 1 + extension;
-            int score;
-
-            try {
-                if (firstMove) {
-                    score = -negamax(
-                            child, childDepth, -beta, -alpha, 1,
-                            givesCheck ? 1 : 0, childPositionKey
-                    );
-                } else {
-                    score = -negamax(
-                            child, childDepth, -alpha - 1, -alpha, 1,
-                            givesCheck ? 1 : 0, childPositionKey
-                    );
-                    if (score > alpha && score < beta) {
-                        score = -negamax(
-                                child, childDepth, -beta, -alpha, 1,
-                                givesCheck ? 1 : 0, childPositionKey
-                        );
-                    }
-                }
-            } finally {
-                popPosition(childPositionKey);
-            }
-
-            firstMove = false;
-            if (score > bestScore) {
-                bestScore = score;
-                bestMove = move;
-            }
-            if (score > alpha) alpha = score;
+            return new RootResult(
+                    null,
+                    0
+            );
         }
 
-        storeTransposition(rootKey, depth, bestScore, TT_EXACT, bestMove, 0);
-        return new RootResult(bestMove, bestScore);
+        orderMoves(
+                board,
+                moves,
+                previousBest
+        );
+
+        Move bestMove =
+                moves.get(0);
+
+        int bestScore =
+                -INFINITY;
+
+        int alpha =
+                -INFINITY;
+
+        int beta =
+                INFINITY;
+
+        for (Move move : moves) {
+
+            checkTime();
+
+            Board child =
+                    board.copyAndPlayMoveForSearch(
+                            move
+                    );
+
+            /*
+             * Give checking moves an extension.
+             */
+            boolean givesCheck =
+                    child.isInCheck(
+                            child.isWhiteToMove()
+                    );
+
+            int extension =
+                    givesCheck
+                            ? 1
+                            : 0;
+
+            int score =
+                    -negamax(
+                            child,
+                            depth - 1 + extension,
+                            -beta,
+                            -alpha,
+                            1,
+                            givesCheck
+                                    ? 1
+                                    : 0
+                    );
+
+            if (score > bestScore) {
+
+                bestScore =
+                        score;
+
+                bestMove =
+                        move;
+            }
+
+            if (score > alpha) {
+
+                alpha =
+                        score;
+            }
+        }
+
+        return new RootResult(
+                bestMove,
+                bestScore
+        );
     }
 
+    /**
+     * Negamax alpha beta search.
+     *
+     * Scores are always returned from the perspective
+     * of the side whose turn it is.
+     *
+     * Checking moves receive search extensions.
+     */
     private int negamax(
             Board board,
             int depth,
             int alpha,
             int beta,
             int ply,
-            int checkExtensions,
-            String positionKey
+            int checkExtensions
     ) {
+
         nodes++;
-        checkTimePeriodically();
 
-        boolean side = board.isWhiteToMove();
-        List<Move> moves = board.getLegalMoves(side);
+        checkTime();
+
+        boolean side =
+                board.isWhiteToMove();
+
+        List<Move> moves =
+                board.getLegalMoves(side);
+
+        /*
+         * Checkmate or stalemate.
+         */
         if (moves.isEmpty()) {
-            return board.isInCheck(side) ? -MATE_SCORE + ply : 0;
+
+            if (board.isInCheck(side)) {
+
+                /*
+                 * Mate sooner is better for the attacker.
+                 */
+                return -MATE_SCORE + ply;
+            }
+
+            return 0;
         }
-        if (isDraw(board, positionKey)) return 0;
-        if (ply >= MAX_PLY - 1) return evaluateForSide(board, side);
+
+        /*
+         * Draw detection.
+         */
+        if (
+                board.isSeventyFiveMoveRule()
+                        || board.isFivefoldRepetition()
+                        || board.isFiftyMoveRule()
+                        || board.isThreefoldRepetition()
+                        || board.isInsufficientMaterial()
+        ) {
+
+            return 0;
+        }
+
+        /*
+         * Leaf node.
+         */
         if (depth <= 0) {
-            return quiescence(board, alpha, beta, ply, 0, positionKey);
+
+            return quiescence(
+                    board,
+                    alpha,
+                    beta,
+                    ply,
+                    0
+            );
         }
 
-        long key = board.getSearchKey();
-        int index = tableIndex(key);
-        boolean tableHit = ttGenerations[index] == searchGeneration
-                && ttDepths[index] >= 0
-                && ttKeys[index] == key;
-        Move tableMove = tableHit ? ttMoves[index] : null;
-        boolean tableAllowed = repetitionCounts.getOrDefault(positionKey, 0) <= 1;
+        /*
+         * Tactical move ordering.
+         */
+        orderMoves(
+                board,
+                moves,
+                null
+        );
 
-        if (tableAllowed && tableHit && ttDepths[index] >= depth) {
-            int tableScore = scoreFromTable(ttScores[index], ply);
-            if (ttFlags[index] == TT_EXACT) return tableScore;
-            if (ttFlags[index] == TT_LOWER) alpha = Math.max(alpha, tableScore);
-            else if (ttFlags[index] == TT_UPPER) beta = Math.min(beta, tableScore);
-            if (alpha >= beta) return tableScore;
-        }
-
-        int originalAlpha = alpha;
-
-        boolean inCheck = board.isInCheck(side);
-        orderMoves(board, moves, tableMove, ply);
-
-        Move bestMove = moves.get(0);
-        int bestScore = -INFINITY;
-        boolean firstMove = true;
-        int moveNumber = 0;
+        int best =
+                -INFINITY;
 
         for (Move move : moves) {
-            checkTimePeriodically();
-            moveNumber++;
 
-            boolean quiet = !isCapture(board, move) && !move.isPromotion();
-            Board child = board.copyAndPlayMoveForSearch(move);
-            String childPositionKey = pushPosition(child);
-            boolean givesCheck = child.isInCheck(child.isWhiteToMove());
+            checkTime();
 
-            int extension = givesCheck && checkExtensions < MAX_CHECK_EXTENSIONS ? 1 : 0;
-            int nextExtensions = checkExtensions + extension;
-            int fullDepth = depth - 1 + extension;
-            int score;
-
-            try {
-                if (firstMove) {
-                    score = -negamax(
-                            child, fullDepth, -beta, -alpha, ply + 1,
-                            nextExtensions, childPositionKey
-                    );
-                } else {
-                    int reduction = lateMoveReduction(
-                            depth, moveNumber, quiet, inCheck, givesCheck
-                    );
-                    int reducedDepth = Math.max(0, fullDepth - reduction);
-
-                    score = -negamax(
-                            child, reducedDepth, -alpha - 1, -alpha, ply + 1,
-                            nextExtensions, childPositionKey
+            Board child =
+                    board.copyAndPlayMoveForSearch(
+                            move
                     );
 
-                    if (score > alpha && reducedDepth < fullDepth) {
-                        score = -negamax(
-                                child, fullDepth, -alpha - 1, -alpha, ply + 1,
-                                nextExtensions, childPositionKey
-                        );
-                    }
-                    if (score > alpha && score < beta) {
-                        score = -negamax(
-                                child, fullDepth, -beta, -alpha, ply + 1,
-                                nextExtensions, childPositionKey
-                        );
-                    }
-                }
-            } finally {
-                popPosition(childPositionKey);
+            /*
+             * Determine whether the move gives check.
+             */
+            boolean givesCheck =
+                    child.isInCheck(
+                            child.isWhiteToMove()
+                    );
+
+            /*
+             * Check extension.
+             */
+            int extension = 0;
+
+            int newCheckExtensions =
+                    checkExtensions;
+
+            if (
+                    givesCheck
+                            && checkExtensions
+                            < MAX_CHECK_EXTENSIONS
+            ) {
+
+                extension = 1;
+
+                newCheckExtensions =
+                        checkExtensions + 1;
             }
 
-            firstMove = false;
-            if (score > bestScore) {
-                bestScore = score;
-                bestMove = move;
-            }
-            if (score > alpha) alpha = score;
+            int score =
+                    -negamax(
+                            child,
+                            depth - 1 + extension,
+                            -beta,
+                            -alpha,
+                            ply + 1,
+                            newCheckExtensions
+                    );
 
+            if (score > best) {
+
+                best =
+                        score;
+            }
+
+            if (score > alpha) {
+
+                alpha =
+                        score;
+            }
+
+            /*
+             * Beta cutoff.
+             */
             if (alpha >= beta) {
-                if (quiet) recordQuietCutoff(move, side, ply, depth);
-                if (tableAllowed) {
-                    storeTransposition(key, depth, bestScore, TT_LOWER, bestMove, ply);
-                }
-                return bestScore;
+
+                break;
             }
         }
 
-        if (tableAllowed) {
-            byte flag = bestScore <= originalAlpha ? TT_UPPER : TT_EXACT;
-            storeTransposition(key, depth, bestScore, flag, bestMove, ply);
-        }
-        return bestScore;
+        return best;
     }
 
+    /**
+     * Quiescence search.
+     *
+     * Continues searching tactical positions instead
+     * of stopping immediately after a capture.
+     *
+     * The search is limited by MAX_QUIESCENCE_DEPTH
+     * so that endless tactical sequences cannot cause
+     * a StackOverflowError.
+     */
     private int quiescence(
             Board board,
             int alpha,
             int beta,
             int ply,
-            int quiescenceDepth,
-            String positionKey
+            int quiescenceDepth
     ) {
+
         nodes++;
-        checkTimePeriodically();
 
-        boolean side = board.isWhiteToMove();
-        List<Move> legalMoves = board.getLegalMoves(side);
+        checkTime();
+
+        boolean side =
+                board.isWhiteToMove();
+
+        List<Move> legalMoves =
+                board.getLegalMoves(side);
+
+        /*
+         * Checkmate or stalemate.
+         *
+         * This must happen before the depth cutoff so
+         * that checkmate is still recognized correctly.
+         */
         if (legalMoves.isEmpty()) {
-            return board.isInCheck(side) ? -MATE_SCORE + ply : 0;
-        }
-        if (isDraw(board, positionKey)) return 0;
 
-        boolean inCheck = board.isInCheck(side);
-        if (quiescenceDepth >= HARD_QUIESCENCE_DEPTH) {
-            return evaluateForSide(board, side);
-        }
+            if (board.isInCheck(side)) {
 
-        if (!inCheck) {
-            int standPat = evaluateForSide(board, side);
-            if (standPat >= beta) return standPat;
-            if (standPat > alpha) alpha = standPat;
-            if (quiescenceDepth >= MAX_QUIESCENCE_DEPTH) return alpha;
-
-            legalMoves.removeIf(move -> !isNoisy(board, move));
-            if (legalMoves.isEmpty()) return alpha;
-        }
-
-        orderMoves(board, legalMoves, null, ply);
-
-        for (Move move : legalMoves) {
-            checkTimePeriodically();
-            Board child = board.copyAndPlayMoveForSearch(move);
-            String childPositionKey = pushPosition(child);
-            int score;
-
-            try {
-                score = -quiescence(
-                        child, -beta, -alpha, ply + 1,
-                        quiescenceDepth + 1, childPositionKey
-                );
-            } finally {
-                popPosition(childPositionKey);
+                return -MATE_SCORE + ply;
             }
 
-            if (score >= beta) return score;
-            if (score > alpha) alpha = score;
+            return 0;
+        }
+
+        /*
+         * If the quiescence depth limit has been reached,
+         * stop searching and use the static evaluation.
+         *
+         * This prevents infinite recursion from long
+         * sequences of checks or captures.
+         */
+        if (
+                quiescenceDepth
+                        >= MAX_QUIESCENCE_DEPTH
+        ) {
+
+            return side
+                    ? evaluator.evaluate(board)
+                    : -evaluator.evaluate(board);
+        }
+
+        /*
+         * If in check, every legal evasion must be searched.
+         *
+         * We cannot use stand-pat here because being in
+         * check means the current position cannot simply
+         * be evaluated without making a move.
+         */
+        if (board.isInCheck(side)) {
+
+            orderMoves(
+                    board,
+                    legalMoves,
+                    null
+            );
+
+            for (Move move :
+                    legalMoves) {
+
+                checkTime();
+
+                Board child =
+                        board.copyAndPlayMoveForSearch(
+                                move
+                        );
+
+                int score =
+                        -quiescence(
+                                child,
+                                -beta,
+                                -alpha,
+                                ply + 1,
+                                quiescenceDepth + 1
+                        );
+
+                if (score >= beta) {
+
+                    return beta;
+                }
+
+                if (score > alpha) {
+
+                    alpha =
+                            score;
+                }
+            }
+
+            return alpha;
+        }
+
+        /*
+         * Static evaluation.
+         */
+        int standPat =
+                side
+                        ? evaluator.evaluate(board)
+                        : -evaluator.evaluate(board);
+
+        if (standPat >= beta) {
+
+            return beta;
+        }
+
+        if (standPat > alpha) {
+
+            alpha =
+                    standPat;
+        }
+
+        /*
+         * Search tactical moves.
+         */
+        List<Move> tactical =
+                new ArrayList<>();
+
+        for (Move move :
+                legalMoves) {
+
+            if (
+                    isTactical(
+                            board,
+                            move
+                    )
+            ) {
+
+                tactical.add(move);
+            }
+        }
+
+        /*
+         * If there are no tactical moves, the position
+         * is quiet enough to stop.
+         */
+        if (tactical.isEmpty()) {
+
+            return alpha;
+        }
+
+        orderMoves(
+                board,
+                tactical,
+                null
+        );
+
+        for (Move move :
+                tactical) {
+
+            checkTime();
+
+            Board child =
+                    board.copyAndPlayMoveForSearch(
+                            move
+                    );
+
+            int score =
+                    -quiescence(
+                            child,
+                            -beta,
+                            -alpha,
+                            ply + 1,
+                            quiescenceDepth + 1
+                    );
+
+            if (score >= beta) {
+
+                return beta;
+            }
+
+            if (score > alpha) {
+
+                alpha =
+                        score;
+            }
         }
 
         return alpha;
     }
 
-    private int lateMoveReduction(
-            int depth,
-            int moveNumber,
-            boolean quiet,
-            boolean inCheck,
-            boolean givesCheck
+    /**
+     * Determine whether a move is tactical.
+     *
+     * Tactical moves include:
+     *
+     * captures
+     * promotions
+     * en passant
+     * checks
+     */
+    private boolean isTactical(
+            Board board,
+            Move move
     ) {
-        if (depth < 3 || moveNumber < 5 || !quiet || inCheck || givesCheck) return 0;
-        return depth >= 6 && moveNumber >= 10 ? 2 : 1;
-    }
-
-    private boolean isDraw(Board board, String positionKey) {
-        return board.isSeventyFiveMoveRule()
-                || board.isFiftyMoveRule()
-                || repetitionCounts.getOrDefault(positionKey, 0) >= 3
-                || board.isInsufficientMaterial();
-    }
-
-    private int evaluateForSide(Board board, boolean side) {
-        int evaluation = evaluator.evaluate(board);
-        return side ? evaluation : -evaluation;
-    }
-
-    private String pushPosition(Board board) {
-        String key = board.getPositionKey();
-        repetitionCounts.merge(key, 1, Integer::sum);
-        return key;
-    }
-
-    private void popPosition(String key) {
-        int count = repetitionCounts.getOrDefault(key, 0);
-        if (count <= 1) repetitionCounts.remove(key);
-        else repetitionCounts.put(key, count - 1);
-    }
-
-    private boolean isNoisy(Board board, Move move) {
-        return move.isPromotion() || move.isEnPassant() || isCapture(board, move);
-    }
-
-    private boolean isCapture(Board board, Move move) {
-        return move.isEnPassant() || board.getPiece(move.getEnd()) != null;
-    }
-
-    private void orderMoves(Board board, List<Move> moves, Move principalMove, int ply) {
-        moves.sort(Comparator.comparingInt(
-                move -> -moveOrderingScore(board, move, principalMove, ply)
-        ));
-    }
-
-    private int moveOrderingScore(Board board, Move move, Move principalMove, int ply) {
-        int score = 0;
-
-        if (principalMove != null && sameMove(move, principalMove)) score += 2_000_000;
 
         if (move.isPromotion()) {
-            score += 1_200_000 + move.getPromotionPiece().getValue();
+
+            return true;
         }
 
-        Piece captured = board.getPiece(move.getEnd());
-        if (captured != null || move.isEnPassant()) {
-            Piece attacker = board.getPiece(move.getStart());
-            int victimValue = captured == null ? 100 : captured.getValue();
-            int attackerValue = attacker == null ? 0 : attacker.getValue();
-            score += 1_000_000 + victimValue * 16 - attackerValue;
-        } else if (ply < MAX_PLY) {
-            if (killerMoves[ply][0] != null && sameMove(move, killerMoves[ply][0])) {
-                score += 900_000;
-            } else if (killerMoves[ply][1] != null && sameMove(move, killerMoves[ply][1])) {
-                score += 800_000;
-            }
+        if (move.isEnPassant()) {
 
-            Piece mover = board.getPiece(move.getStart());
-            if (mover != null) {
-                int side = mover.isWhite() ? 0 : 1;
-                score += history[side][squareIndex(move.getStart())][squareIndex(move.getEnd())];
-            }
+            return true;
         }
 
-        if (move.isCastling()) score += 10_000;
-        return score;
-    }
+        /*
+         * Normal capture.
+         */
+        if (
+                board.getPiece(
+                        move.getEnd()
+                ) != null
+        ) {
 
-    private void recordQuietCutoff(Move move, boolean side, int ply, int depth) {
-        if (ply < MAX_PLY && !sameMove(move, killerMoves[ply][0])) {
-            killerMoves[ply][1] = killerMoves[ply][0];
-            killerMoves[ply][0] = move;
+            return true;
         }
 
-        int sideIndex = side ? 0 : 1;
-        int from = squareIndex(move.getStart());
-        int to = squareIndex(move.getEnd());
-        history[sideIndex][from][to] = Math.min(
-                750_000,
-                history[sideIndex][from][to] + depth * depth
+        /*
+         * Check detection.
+         */
+        Board child =
+                board.copyAndPlayMoveForSearch(
+                        move
+                );
+
+        return child.isInCheck(
+                child.isWhiteToMove()
         );
     }
 
-    private int squareIndex(Position position) {
-        return position.getRow() * 8 + position.getColumn();
-    }
-
-    private boolean sameMove(Move a, Move b) {
-        if (a == null || b == null) return false;
-        if (!a.getStart().equals(b.getStart()) || !a.getEnd().equals(b.getEnd())) return false;
-        if (a.isPromotion() != b.isPromotion()) return false;
-        return !a.isPromotion()
-                || a.getPromotionPiece().getClass() == b.getPromotionPiece().getClass();
-    }
-
-    private int tableIndex(long key) {
-        return (int) (key ^ (key >>> 32)) & TT_MASK;
-    }
-
-    private void storeTransposition(
-            long key,
-            int depth,
-            int score,
-            byte flag,
-            Move bestMove,
-            int ply
+    /**
+     * Move ordering.
+     */
+    private void orderMoves(
+            Board board,
+            List<Move> moves,
+            Move principalVariationMove
     ) {
-        int index = tableIndex(key);
-        boolean currentEntry = ttGenerations[index] == searchGeneration;
-        if (currentEntry && ttKeys[index] != key && ttDepths[index] > depth + 2) return;
-        if (currentEntry && ttKeys[index] == key
-                && ttDepths[index] > depth && flag != TT_EXACT) return;
 
-        ttKeys[index] = key;
-        ttDepths[index] = depth;
-        ttScores[index] = scoreToTable(score, ply);
-        ttFlags[index] = flag;
-        ttMoves[index] = bestMove;
-        ttGenerations[index] = searchGeneration;
+        moves.sort(
+                Comparator.comparingInt(
+                        move ->
+                                -moveOrderingScore(
+                                        board,
+                                        move,
+                                        principalVariationMove
+                                )
+                )
+        );
     }
 
-    private int scoreToTable(int score, int ply) {
-        if (score > MATE_THRESHOLD) return score + ply;
-        if (score < -MATE_THRESHOLD) return score - ply;
+    /**
+     * Score a move for ordering.
+     *
+     * This does not determine whether a move is good.
+     * It determines which moves are searched first.
+     */
+    private int moveOrderingScore(
+            Board board,
+            Move move,
+            Move principalVariationMove
+    ) {
+
+        int score = 0;
+
+        /*
+         * Previous best move.
+         */
+        if (
+                principalVariationMove != null
+                        && sameMove(
+                        move,
+                        principalVariationMove
+                )
+        ) {
+
+            score += 1_000_000;
+        }
+
+        /*
+         * Promotions.
+         */
+        if (move.isPromotion()) {
+
+            score +=
+                    80_000
+                            + move
+                            .getPromotionPiece()
+                            .getValue();
+        }
+
+        /*
+         * Captures.
+         */
+        Piece captured =
+                board.getPiece(
+                        move.getEnd()
+                );
+
+        if (captured != null) {
+
+            Piece attacker =
+                    board.getPiece(
+                            move.getStart()
+                    );
+
+            int attackerValue =
+                    attacker == null
+                            ? 0
+                            : attacker.getValue();
+
+            score +=
+                    50_000
+                            + captured.getValue() * 10
+                            - attackerValue;
+        }
+
+        /*
+         * En passant.
+         */
+        if (move.isEnPassant()) {
+
+            score += 50_000;
+        }
+
+        /*
+         * Castling.
+         */
+        if (move.isCastling()) {
+
+            score += 2_000;
+        }
+
+        /*
+         * Checks should be searched very early.
+         */
+        Board child =
+                board.copyAndPlayMoveForSearch(
+                        move
+                );
+
+        if (
+                child.isInCheck(
+                        child.isWhiteToMove()
+                )
+        ) {
+
+            score += 40_000;
+        }
+
         return score;
     }
 
-    private int scoreFromTable(int score, int ply) {
-        if (score > MATE_THRESHOLD) return score - ply;
-        if (score < -MATE_THRESHOLD) return score + ply;
-        return score;
+    /**
+     * Compare two moves.
+     */
+    private boolean sameMove(
+            Move a,
+            Move b
+    ) {
+
+        if (
+                !a.getStart()
+                        .equals(b.getStart())
+        ) {
+
+            return false;
+        }
+
+        if (
+                !a.getEnd()
+                        .equals(b.getEnd())
+        ) {
+
+            return false;
+        }
+
+        if (
+                a.isPromotion()
+                        != b.isPromotion()
+        ) {
+
+            return false;
+        }
+
+        if (a.isPromotion()) {
+
+            return
+                    a.getPromotionPiece()
+                            .getClass()
+                            ==
+                            b.getPromotionPiece()
+                                    .getClass();
+        }
+
+        return true;
     }
 
-    private void checkTimePeriodically() {
-        if ((nodes & 255L) == 0L) checkTime();
-    }
-
+    /**
+     * Stop search when the clock expires.
+     */
     private void checkTime() {
-        if (!ignoreTimeout && System.nanoTime() >= deadlineNanos) {
+
+        if (
+                System.nanoTime()
+                        >= deadlineNanos
+        ) {
+
             throw new SearchTimeoutException();
         }
     }
 
-    private static class SearchTimeoutException extends RuntimeException {
-        private static final long serialVersionUID = 1L;
+    private static class SearchTimeoutException
+            extends RuntimeException {
     }
 
-    private record RootResult(Move move, int score) {
+    private record RootResult(
+            Move move,
+            int score
+    ) {
     }
 
-    public record SearchResult(Move bestMove, int score, int depth, long nodes) {
+    public record SearchResult(
+            Move bestMove,
+            int score,
+            int depth,
+            long nodes
+    ) {
     }
 }

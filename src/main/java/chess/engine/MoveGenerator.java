@@ -18,7 +18,8 @@ public class MoveGenerator {
         }
 
         for (Move move : piece.generateMoves(position, board)) {
-            Board copy = board.copyAndMakeMoveForValidation(move);
+            Board copy = new Board(board);
+            copy.makeMove(move);
 
             if (!copy.isInCheck(piece.isWhite())) {
                 legalMoves.add(move);

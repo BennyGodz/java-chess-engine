@@ -13,11 +13,7 @@ The engine uses several search techniques to improve move quality and reduce the
 - Minimax search
 - Alpha-beta pruning
 - Quiescence search
-- Transposition table
-- Principal-variation search
-- Killer/history move ordering
-- Late-move reductions
-- Check extensions
+- Move ordering
 - Time controlled search
 - Depth limited search
 
@@ -175,9 +171,12 @@ This reduces the horizon effect and improves tactical accuracy.
 
 ## Future Improvements
 
+- Iterative deepening
+- Transposition tables
 - Zobrist hashing
 - Magic bitboards
 - Null move pruning
+- Late move reductions
 - Endgame tablebases
 - Parallel search
 

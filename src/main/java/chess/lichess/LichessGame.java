@@ -40,16 +40,11 @@ public class LichessGame {
 
     private boolean gameStarted = false;
 
-    private long whiteTimeMillis = -1;
-    private long blackTimeMillis = -1;
-    private long whiteIncrementMillis = 0;
-    private long blackIncrementMillis = 0;
-
     /*
      * Main blitz search.
      */
-    private static final int SEARCH_DEPTH = 64;
-    private static final long DEFAULT_SEARCH_TIME_MS = 1_000;
+    private static final int SEARCH_DEPTH = 6;
+    private static final long SEARCH_TIME_MS = 600;
 
 
     public LichessGame(
@@ -250,8 +245,6 @@ public class LichessGame {
         JsonNode state =
                 event.get("state");
 
-        updateClock(state);
-
         String moves = "";
 
         if (state != null
@@ -306,8 +299,6 @@ public class LichessGame {
     private void handleGameState(
             JsonNode event
     ) {
-
-        updateClock(event);
 
         String moves =
                 event.has("moves")
@@ -616,18 +607,11 @@ public class LichessGame {
                 "Using normal engine search."
         );
 
-        long searchTimeMillis = calculateSearchTimeMillis();
-
-        System.out.printf(
-                "Search time budget: %,d ms%n",
-                searchTimeMillis
-        );
-
         SearchEngine.SearchResult result =
                 engine.findBestMove(
                         board,
                         SEARCH_DEPTH,
-                        searchTimeMillis
+                        SEARCH_TIME_MS
                 );
 
         Move bestMove =
@@ -660,40 +644,6 @@ public class LichessGame {
         sendMoveToLichess(
                 bestMove
         );
-    }
-
-    private void updateClock(JsonNode state) {
-        if (state == null) return;
-
-        if (state.has("wtime")) whiteTimeMillis = state.get("wtime").asLong();
-        if (state.has("btime")) blackTimeMillis = state.get("btime").asLong();
-        if (state.has("winc")) whiteIncrementMillis = state.get("winc").asLong();
-        if (state.has("binc")) blackIncrementMillis = state.get("binc").asLong();
-    }
-
-    /**
-     * Spend more time when the clock permits it, then taper aggressively near time trouble.
-     */
-    private long calculateSearchTimeMillis() {
-        long remaining = botIsWhite ? whiteTimeMillis : blackTimeMillis;
-        long increment = botIsWhite ? whiteIncrementMillis : blackIncrementMillis;
-
-        if (remaining < 0) return DEFAULT_SEARCH_TIME_MS;
-        if (remaining <= 100) return Math.max(1, remaining / 4);
-
-        long reserve = Math.max(250, Math.min(3_000, remaining / 20));
-        long usable = Math.max(1, remaining - reserve);
-        int moveNumber = board.getFullmoveNumber();
-        int divisor = moveNumber < 20 ? 45 : moveNumber < 40 ? 32 : 20;
-        long allocation = usable / divisor + increment * 3 / 4;
-
-        long cap;
-        if (remaining > 30_000) cap = 2_200;
-        else if (remaining > 10_000) cap = 1_200;
-        else if (remaining > 3_000) cap = 450;
-        else cap = Math.max(25, remaining / 12);
-
-        return Math.max(25, Math.min(cap, allocation));
     }
 
     /**
